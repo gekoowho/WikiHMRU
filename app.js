@@ -12,6 +12,37 @@ const blockNames = { heading: 'Заголовок', text: 'Текст', code: '�
 let view = 'home', sectionId = null, selectedId = null, query = '', editingId = null, editorKind = 'knowledge';
 let draftBlocks = [], pendingFiles = new Map(), versions = null, adminTab = 'sections', readerPreview = false, toastTimer;
 const activeAdmin = () => db.isAdmin() && !readerPreview;
+function readRoute() {
+  const params = new URLSearchParams(location.search);
+  view = Object.hasOwn(rootNames, params.get('view')) ? params.get('view') : 'home';
+  sectionId = params.get('section') || null;
+  selectedId = params.get('entry') || null;
+  query = params.get('q') || '';
+  versions = null;
+}
+function syncRoute(replace = false) {
+  const url = new URL(location.href);
+  for (const key of ['view', 'section', 'entry', 'q']) url.searchParams.delete(key);
+  if (view !== 'home') url.searchParams.set('view', view);
+  if (sectionId) url.searchParams.set('section', sectionId);
+  if (selectedId) url.searchParams.set('entry', selectedId);
+  if (query) url.searchParams.set('q', query);
+  if (url.href !== location.href) history[replace ? 'replaceState' : 'pushState'](null, '', url);
+}
+readRoute();
+window.addEventListener('popstate', () => { readRoute(); render(); });
+function remoteLink(item) {
+  const tool = String(item.tool || '').toLowerCase().replace(/[\s-]/g, '');
+  const id = String(item.remote_id || '').replace(/\s/g, '');
+  if (['anydesk', 'энидеск', 'анидеск'].includes(tool) && /^[a-zA-Z0-9][a-zA-Z0-9@._-]{0,127}$/.test(id)) return { href: 'anydesk:' + id, label: 'Подключиться через AnyDesk' };
+  if (['rudesktop', 'рудесктоп'].includes(tool) && /^\d{1,20}$/.test(id)) return { href: 'wikihmru-rudesktop:' + id, label: 'Подключиться через RuDesktop', setup: true };
+  return null;
+}
+function remoteActions(item) {
+  const link = remoteLink(item);
+  return `<div class="detail-actions">${link ? `<a class="button-primary" href="${escapeHtml(link.href)}">${link.label}</a>` : ''}<button class="button-quiet" data-copy-remote="${escapeHtml(item.id)}">Скопировать ID</button></div>${link?.setup ? '<details><summary>Настроить запуск RuDesktop на Windows</summary><p>Скачайте установщик, запустите его в PowerShell и укажите путь к установленному RuDesktop. Настройка выполняется один раз на каждом компьютере.</p><a href="https://github.com/gekoowho/WikiHMRU/blob/main/scripts/install-remote-links.ps1" target="_blank" rel="noopener noreferrer">Открыть установщик</a></details>' : ''}`;
+}
+
 function toast(message) { const el = $('#toast'); el.textContent = message; el.classList.add('show'); clearTimeout(toastTimer); toastTimer = setTimeout(() => el.classList.remove('show'), 3800); }
 function theme(mode) { document.documentElement.dataset.theme = mode; localStorage.setItem('opora-theme', mode); $('#theme-toggle').textContent = mode === 'dark' ? '☀' : '☾'; $('#theme-toggle').title = mode === 'dark' ? 'Светлая тема' : 'Тёмная тема'; }
 theme(localStorage.getItem('opora-theme') === 'dark' ? 'dark' : 'light');
@@ -73,10 +104,10 @@ function blockHtml(block) {
   return '';
 }
 function detail() {
-  const item = db.entries.find(e => e.id === selectedId && visibleEntry(e)); if (!item) { selectedId = null; return listing(view); }
+  const item = db.entries.find(e => e.id === selectedId && visibleEntry(e)); if (!item) return '<button class="back-button" data-back>← Назад к списку</button><h1>Запись недоступна</h1><p>Она удалена или у вас нет доступа.</p>';
   const trail = sectionTrail(item.section_id);
   return `<button class="back-button" data-back>← Назад к списку</button><article class="article"><div class="article-top"><span class="badge ${escapeHtml(item.type)}">${escapeHtml(rootNames[item.type])}</span>${item.visibility === 'admins' ? '<span class="private-chip">⌁ Только админам</span>' : ''}</div><h1>${escapeHtml(item.title)}</h1><div class="article-meta">${escapeHtml(trail)} · Обновлено ${date(item.updated_at)}</div>${item.summary ? `<p class="article-lead">${escapeHtml(item.summary)}</p>` : ''}
-  ${item.type === 'access' ? `<div class="access-info"><div><small>ПРОГРАММА</small><strong>${escapeHtml(item.tool || '—')}</strong></div><div><small>УСТРОЙСТВО</small><strong>${escapeHtml(item.device || '—')}</strong></div><div><small>ID ПОДКЛЮЧЕНИЯ</small><strong>${escapeHtml(item.remote_id || '—')}</strong></div></div>` : ''}
+  ${item.type === 'access' ? `<div class="access-info"><div><small>ПРОГРАММА</small><strong>${escapeHtml(item.tool || '—')}</strong></div><div><small>УСТРОЙСТВО</small><strong>${escapeHtml(item.device || '—')}</strong></div><div><small>ID ПОДКЛЮЧЕНИЯ</small><strong>${escapeHtml(item.remote_id || '—')}</strong></div></div>${remoteActions(item)}` : ''}
   <div class="article-body">${(item.blocks || []).map((b, i) => blockHtml({ ...b, id: String(i) })).join('') || '<p class="article-muted">Материал пока не заполнен.</p>'}</div>
   ${activeAdmin() ? `<div class="detail-actions"><button class="button-quiet" data-edit-entry="${escapeHtml(item.id)}">Редактировать</button><button class="button-quiet" data-history="${escapeHtml(item.id)}">История изменений</button><button class="button-danger" data-delete-entry="${escapeHtml(item.id)}">Удалить</button></div><div id="history-panel"></div>` : ''}</article>`;
 }
@@ -110,6 +141,7 @@ function render() {
   $('#export-button').hidden = db.cloud; $('#import-button').hidden = db.cloud;
   $('#logout-button')?.remove();
   if (db.cloud && db.session && !db.needsPassword) { const btn = document.createElement('button'); btn.id = 'logout-button'; btn.className = 'sidebar-action'; btn.textContent = '↪  Выйти из аккаунта'; $('.sidebar-bottom').prepend(btn); }
+  if (showApp) syncRoute();
   hydrateImages($('#content'));
 }
 function go(next, sec = null) { if (db.cloud && (!db.session || db.needsPassword)) return; view = next; sectionId = sec; selectedId = null; query = ''; versions = null; render(); }
@@ -178,7 +210,7 @@ document.addEventListener('click', async event => {
   if (button.id === 'theme-toggle') return theme(document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark');
   if (button.dataset.view) return go(button.dataset.view);
   if (button.dataset.section) { const kind = button.dataset.kind; view = kind; sectionId = button.dataset.section === 'all' ? null : button.dataset.section; selectedId = null; query = ''; render(); return; }
-  if (button.dataset.open) { selectedId = button.dataset.open; versions = null; render(); return; }
+  if (button.dataset.open) { const item = db.entries.find(e => e.id === button.dataset.open && visibleEntry(e)); if (!item) return; selectedId = item.id; view = item.type; versions = null; render(); return; }
   if (button.dataset.back !== undefined) { selectedId = null; render(); return; }
   if (button.dataset.create) return openEditor(button.dataset.create);
   if (button.id === 'new-button') return openEditor(['knowledge','cases','access'].includes(view) ? view : 'knowledge');
@@ -192,7 +224,8 @@ document.addEventListener('click', async event => {
   if (button.dataset.adminTab) { adminTab = button.dataset.adminTab; render(); return; }
   if (button.dataset.readerPreview !== undefined) { readerPreview = true; go('home'); return; }
   if (button.dataset.exitPreview !== undefined) { readerPreview = false; go('admin'); return; }
-  if (button.dataset.search !== undefined) { const value = $('#home-search').value.trim(); go('search'); query = value; render(); return; }
+  if (button.dataset.search !== undefined) { query = $('#home-search').value.trim(); view = 'search'; sectionId = null; selectedId = null; versions = null; render(); return; }
+  if (button.dataset.copyRemote) { const item = db.entries.find(e => e.id === button.dataset.copyRemote && visibleEntry(e)); if (item) { try { await navigator.clipboard.writeText(item.remote_id || ''); toast('ID скопирован'); } catch { toast('Не удалось скопировать ID'); } } return; }
   if (button.dataset.copyCode !== undefined) { const b = db.entries.find(e => e.id === selectedId)?.blocks?.[Number(button.dataset.copyCode)]; if (b) { await navigator.clipboard.writeText(b.text || ''); toast('Код скопирован'); } return; }
   if (button.dataset.addBlock) { draftBlocks.push({ type: button.dataset.addBlock, client_id: uuid(), text: '', caption: '', path: '', href: '' }); renderBlocks(); return; }
   if (button.dataset.removeBlock !== undefined) { const index = Number(button.dataset.removeBlock); const removed = draftBlocks.splice(index,1)[0]; if (removed?.preview) URL.revokeObjectURL(removed.preview); pendingFiles.delete(removed?.client_id); renderBlocks(); return; }
@@ -202,8 +235,8 @@ document.addEventListener('click', async event => {
   if (button.id === 'logout-button') { await db.logout(); readerPreview = false; go('home'); render(); return; }
 });
 $('#content').addEventListener('input', event => {
-  if (event.target.id === 'list-search') { query = event.target.value; updateListSearch(); }
-  if (event.target.id === 'global-search') { query = event.target.value; updateGlobalSearch(); }
+  if (event.target.id === 'list-search') { query = event.target.value; syncRoute(true); updateListSearch(); }
+  if (event.target.id === 'global-search') { query = event.target.value; syncRoute(true); updateGlobalSearch(); }
 });
 $('#content').addEventListener('keydown', event => { if (event.target.id === 'home-search' && event.key === 'Enter') { event.preventDefault(); query = event.target.value.trim(); view = 'search'; selectedId = null; render(); } });
 $('#content').addEventListener('change', async event => {
