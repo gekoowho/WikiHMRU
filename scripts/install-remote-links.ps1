@@ -1,14 +1,19 @@
 param(
-    [ValidateSet('RuDesktop', 'PuTTY', 'MobaXterm')][string]$Program,
+    [ValidateSet('RuDesktop', 'Terminal')][string]$Program,
     [string]$ClientPath,
     [string]$RuDesktopPath
 )
 $ErrorActionPreference = 'Stop'
 if ($RuDesktopPath) { $Program = 'RuDesktop'; $ClientPath = $RuDesktopPath }
 if (-not $Program) {
-    $Program = Read-Host 'Program: RuDesktop, PuTTY or MobaXterm'
+    $Program = Read-Host 'Program: RuDesktop or Terminal'
 }
-if ($Program -notin @('RuDesktop', 'PuTTY', 'MobaXterm')) { throw 'Unsupported program.' }
+if ($Program -notin @('RuDesktop', 'Terminal')) { throw 'Unsupported program.' }
+if ($Program -eq 'Terminal' -and -not $ClientPath) {
+    $ssh = Get-Command ssh.exe -ErrorAction SilentlyContinue
+    if (-not $ssh) { throw 'Enable the Windows OpenSSH Client optional feature first.' }
+    $ClientPath = $ssh.Source
+}
 if (-not $ClientPath) { $ClientPath = (Read-Host 'Full path to the installed program exe').Trim('"') }
 if (-not (Test-Path -LiteralPath $ClientPath -PathType Leaf) -or [IO.Path]::GetExtension($ClientPath) -ne '.exe') {
     throw 'Select the installed executable.'
@@ -22,7 +27,7 @@ $launcher = Join-Path $directory 'launch.ps1'
 @'
 param([string]$ConnectionUri)
 $ErrorActionPreference = 'Stop'
-if ($ConnectionUri -notmatch '^wikihmru-(rudesktop|putty|mobaxterm):([^\s"<>]+)$') { throw 'Invalid connection link.' }
+if ($ConnectionUri -notmatch '^wikihmru-(rudesktop|terminal):([^\s"<>]+)$') { throw 'Invalid connection link.' }
 $program = $Matches[1]
 $target = [Uri]::UnescapeDataString($Matches[2])
 $client = Get-Content -LiteralPath (Join-Path $PSScriptRoot ($program + '.json')) -Raw | ConvertFrom-Json
@@ -42,13 +47,8 @@ if ($program -eq 'rudesktop') {
         $octets = $hostname.Split('.')
         if ($octets.Count -ne 4 -or @($octets | Where-Object { [int]$_ -gt 255 }).Count) { throw 'Invalid IPv4 address.' }
     }
-    if ($program -eq 'putty') {
-        $arguments = @('-ssh', $hostname, '-P', [string]$port)
-        if ($user) { $arguments += @('-l', $user) }
-    } else {
-        $destination = if ($user) { $user + '@' + $hostname } else { $hostname }
-        $arguments = @('-newtab', ('"ssh -p ' + $port + ' ' + $destination + '"'))
-    }
+    $destination = if ($user) { $user + '@' + $hostname } else { $hostname }
+    $arguments = @('-p', [string]$port, $destination)
 }
 Start-Process -FilePath $client -ArgumentList $arguments
 '@ | Set-Content -LiteralPath $launcher -Encoding UTF8

@@ -39,22 +39,22 @@ function sshTarget(value) {
   if (/^[\d.]+$/.test(match[2]) && (match[2].split('.').length !== 4 || match[2].split('.').some(x => Number(x) > 255))) return null;
   return { host: match[2], user: match[1] || '', port };
 }
-const remotePrograms = ['AnyDesk', 'RuDesktop', 'PuTTY', 'MobaXterm'];
+const remotePrograms = ['AnyDesk', 'RuDesktop', 'Терминал'];
 function canonicalProgram(value) {
   const normalized = String(value || '').toLowerCase().replace(/[\s-]/g, '');
-  return remotePrograms.find(p => p.toLowerCase() === normalized) || ({энидеск:'AnyDesk',анидеск:'AnyDesk',рудесктоп:'RuDesktop'})[normalized] || '';
+  return remotePrograms.find(p => p.toLowerCase() === normalized) || ({энидеск:'AnyDesk',анидеск:'AnyDesk',рудесктоп:'RuDesktop',putty:'Терминал',mobaxterm:'Терминал',terminal:'Терминал'})[normalized] || '';
 }
 function remoteLink(item) {
   const tool = String(item.tool || '').toLowerCase().replace(/[\s-]/g, '');
   const id = String(item.remote_id || '').replace(/\s/g, '');
   if (['anydesk', 'энидеск', 'анидеск'].includes(tool) && /^[a-zA-Z0-9][a-zA-Z0-9@._-]{0,127}$/.test(id)) return { href: 'anydesk:' + id, label: 'Подключиться через AnyDesk' };
   if (['rudesktop', 'рудесктоп'].includes(tool) && /^\d{1,20}$/.test(id)) return { href: 'wikihmru-rudesktop:' + id, label: 'Подключиться через RuDesktop', setup: true };
-  if (['putty', 'mobaxterm'].includes(tool) && sshTarget(id)) return { href: 'wikihmru-' + tool + ':' + encodeURIComponent(id), label: 'Подключиться через ' + (tool === 'putty' ? 'PuTTY' : 'MobaXterm'), setup: true };
+  if (['putty', 'mobaxterm', 'terminal', 'терминал'].includes(tool) && sshTarget(id)) return { href: 'wikihmru-terminal:' + encodeURIComponent(id), label: 'Открыть терминал', setup: true };
   return null;
 }
 function remoteActions(item) {
   const link = remoteLink(item);
-  return `<div class="detail-actions">${link ? `<a class="button-primary" href="${escapeHtml(link.href)}">${link.label}</a>` : ''}<button class="button-quiet" data-copy-remote="${escapeHtml(item.id)}">Скопировать ID</button></div>${link?.setup ? '<details><summary>Настроить запуск приложения на Windows</summary><p>Скачайте установщик, запустите его в PowerShell и выберите программу и укажите путь к её исполняемому файлу. Настройка выполняется один раз на каждом компьютере.</p><a href="https://github.com/gekoowho/WikiHMRU/blob/main/scripts/install-remote-links.ps1" target="_blank" rel="noopener noreferrer">Открыть установщик</a></details>' : ''}`;
+  return `<div class="detail-actions">${link ? `<a class="button-primary" href="${escapeHtml(link.href)}">${link.label}</a>` : ''}<button class="button-quiet" data-copy-remote="${escapeHtml(item.id)}">Скопировать ID</button></div>${link?.setup ? '<details><summary>Настроить запуск приложения на Windows</summary><p>Скачайте установщик, запустите его в PowerShell и выберите RuDesktop или Terminal. Для терминала используется встроенный SSH-клиент Windows. Настройка выполняется один раз на каждом компьютере.</p><a href="https://github.com/gekoowho/WikiHMRU/blob/main/scripts/install-remote-links.ps1" target="_blank" rel="noopener noreferrer">Открыть установщик</a></details>' : ''}`;
 }
 
 function toast(message) { const el = $('#toast'); el.textContent = message; el.classList.add('show'); clearTimeout(toastTimer); toastTimer = setTimeout(() => el.classList.remove('show'), 3800); }
@@ -73,7 +73,7 @@ function descendants(id) { const found = new Set([id]); let changed = true; whil
 function sectionName(id) { return db.sections.find(s => s.id === id)?.title || 'Без раздела'; }
 function sectionTrail(id) { const s = db.sections.find(x => x.id === id); return s ? ancestors(s).map(x => x.title).join(' / ') : 'Без раздела'; }
 function card(entry) {
-  const sec = sectionTrail(entry.section_id), excerpt = entry.type === 'access' ? [entry.tool, entry.remote_id].filter(Boolean).join(' · ') : entry.summary || entry.blocks?.find(b => b.type === 'text')?.text || entry.device || 'Откройте запись';
+  const sec = sectionTrail(entry.section_id), excerpt = entry.type === 'access' ? [canonicalProgram(entry.tool) || entry.tool, entry.remote_id].filter(Boolean).join(' · ') : entry.summary || entry.blocks?.find(b => b.type === 'text')?.text || entry.device || 'Откройте запись';
   return `<button class="entry-card" data-open="${escapeHtml(entry.id)}"><div class="card-top"><span class="badge ${escapeHtml(entry.type)}">${escapeHtml(rootNames[entry.type])}</span>${entry.visibility === 'admins' ? '<span class="private-chip">⌁ Только админам</span>' : ''}</div><h3>${escapeHtml(entry.title)}</h3><p>${escapeHtml(excerpt)}</p><div class="card-foot"><span>${escapeHtml(sec)}</span><span>${date(entry.updated_at)}</span></div></button>`;
 }
 function empty(message, kind) { return `<div class="empty-state"><div class="empty-icon">◇</div><h3>Пока здесь пусто</h3><p>${escapeHtml(message)}</p>${activeAdmin() ? `<button data-create="${kind}">Добавить запись</button>` : ''}</div>`; }
@@ -143,7 +143,7 @@ function listing(kind) {
   const sectionSet = sectionId ? descendants(sectionId) : null;
   const all = entriesFor(kind).filter(e => !sectionSet || sectionSet.has(e.section_id));
   const found = searchEntries(all);
-  return `<div class="page-heading"><div><span class="eyebrow">${escapeHtml(rootNames[kind]).toUpperCase()}</span><h1>${sectionId ? escapeHtml(sectionName(sectionId)) : escapeHtml(rootNames[kind])}</h1><p>${kind === 'knowledge' ? 'Проверенные инструкции для типовых задач.' : kind === 'cases' ? 'Разборы нестандартных ситуаций и решений.' : 'Подключения через AnyDesk, RuDesktop, PuTTY и MobaXterm.'}</p></div></div>
+  return `<div class="page-heading"><div><span class="eyebrow">${escapeHtml(rootNames[kind]).toUpperCase()}</span><h1>${sectionId ? escapeHtml(sectionName(sectionId)) : escapeHtml(rootNames[kind])}</h1><p>${kind === 'knowledge' ? 'Проверенные инструкции для типовых задач.' : kind === 'cases' ? 'Разборы нестандартных ситуаций и решений.' : 'Подключения через AnyDesk, RuDesktop и терминал.'}</p></div></div>
   <div class="catalog-layout">${tree(kind)}<div class="catalog-main"><div class="toolbar"><label class="search-wrap"><span>⌕</span><input id="list-search" type="search" placeholder="Поиск в разделе..." value="${escapeHtml(query)}" aria-label="Поиск в разделе"></label>${activeAdmin() ? `<button class="new-button" data-create="${kind}">＋ Добавить</button>` : ''}</div>
   ${kind === 'access' ? '<div class="security-note compact">ID подключений доступны читателям. Пароли, ключи и одноразовые коды здесь не храните.</div>' : ''}
   <div id="list-results" class="list-grid">${found.length ? found.map(card).join('') : empty(all.length ? 'Ничего не найдено. Попробуйте другой запрос.' : 'В этом разделе пока нет записей.', kind)}</div></div></div>`;
@@ -166,7 +166,7 @@ function detail() {
   const item = db.entries.find(e => e.id === selectedId && visibleEntry(e)); if (!item) return '<button class="back-button" data-back>← Назад к списку</button><h1>Запись недоступна</h1><p>Она удалена или у вас нет доступа.</p>';
   const trail = sectionTrail(item.section_id);
   return `<button class="back-button" data-back>← Назад к списку</button><article class="article"><div class="article-top"><span class="badge ${escapeHtml(item.type)}">${escapeHtml(rootNames[item.type])}</span>${item.visibility === 'admins' ? '<span class="private-chip">⌁ Только админам</span>' : ''}</div><h1>${escapeHtml(item.title)}</h1><div class="article-meta">${escapeHtml(trail)} · Обновлено ${date(item.updated_at)}</div>${item.type !== 'access' && item.summary ? `<p class="article-lead">${escapeHtml(item.summary)}</p>` : ''}
-  ${item.type === 'access' ? `<div class="access-info"><div><small>ПРОГРАММА</small><strong>${escapeHtml(item.tool || '—')}</strong></div><div><small>АДРЕС / ID</small><strong>${escapeHtml(item.remote_id || '—')}</strong></div></div>${remoteActions(item)}` : ''}
+  ${item.type === 'access' ? `<div class="access-info"><div><small>ПРОГРАММА</small><strong>${escapeHtml(canonicalProgram(item.tool) || item.tool || '—')}</strong></div><div><small>АДРЕС / ID</small><strong>${escapeHtml(item.remote_id || '—')}</strong></div></div>${remoteActions(item)}` : ''}
   <div class="article-body">${(item.type === 'access' ? [] : item.blocks || []).map((b, i) => blockHtml({ ...b, id: String(i) })).join('') || (item.type === 'access' ? '' : '<p class="article-muted">Материал пока не заполнен.</p>')}</div>
   ${activeAdmin() ? `<div class="detail-actions"><button class="button-quiet" data-edit-entry="${escapeHtml(item.id)}">Редактировать</button><button class="button-quiet" data-history="${escapeHtml(item.id)}">История изменений</button><button class="button-danger" data-delete-entry="${escapeHtml(item.id)}">Удалить</button></div><div id="history-panel"></div>` : ''}</article>`;
 }
