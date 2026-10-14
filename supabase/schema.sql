@@ -23,7 +23,7 @@ select id, coalesce(email, ''), 'reader' from auth.users
 on conflict (id) do update set email = excluded.email;
 
 create or replace function public.prevent_last_wiki_admin_removal()
-returns trigger language plpgsql as $$
+returns trigger language plpgsql set search_path = '' as $$
 begin
   if old.role = 'admin' and new.role <> 'admin' and
      (select count(*) from public.profiles where role = 'admin') <= 1 then
@@ -53,7 +53,7 @@ create table if not exists public.sections (
 );
 
 create or replace function public.check_wiki_section()
-returns trigger language plpgsql as $$
+returns trigger language plpgsql set search_path = '' as $$
 declare parent_kind text;
 begin
   if new.parent_id is not null then
@@ -134,7 +134,7 @@ create trigger entry_version_recorded before update or delete on public.entries
 for each row execute function public.record_wiki_entry_version();
 
 create or replace function public.check_wiki_entry()
-returns trigger language plpgsql as $$
+returns trigger language plpgsql set search_path = '' as $$
 declare section_kind text;
 begin
   if new.section_id is not null then
@@ -219,14 +219,13 @@ on conflict (id) do update set
   allowed_mime_types = excluded.allowed_mime_types;
 
 create or replace function public.wiki_image_entry_id(object_name text)
-returns uuid language sql immutable as $$
+returns uuid language sql immutable set search_path = '' as $$
   select case
     when split_part(object_name, '/', 1) ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
     then split_part(object_name, '/', 1)::uuid
     else null::uuid
   end;
 $$;
-alter table storage.objects enable row level security;
 drop policy if exists "wiki images: permitted read" on storage.objects;
 drop policy if exists "wiki images: admin insert" on storage.objects;
 drop policy if exists "wiki images: admin update" on storage.objects;
@@ -241,6 +240,16 @@ create policy "wiki images: admin update" on storage.objects for update to authe
   with check (bucket_id = 'wiki-images' and public.is_wiki_admin());
 create policy "wiki images: admin delete" on storage.objects for delete to authenticated
   using (bucket_id = 'wiki-images' and public.is_wiki_admin());
+
+-- Политикам нужны функции проверки прав, но анонимный RPC-вызов им не нужен.
+revoke execute on function public.create_wiki_profile(), public.record_wiki_entry_version()
+  from public, anon, authenticated;
+revoke execute on function public.is_wiki_admin(), public.can_read_wiki_section(uuid),
+  public.can_read_wiki_entry(uuid), public.wiki_image_entry_id(text)
+  from public, anon;
+grant execute on function public.is_wiki_admin(), public.can_read_wiki_section(uuid),
+  public.can_read_wiki_entry(uuid), public.wiki_image_entry_id(text)
+  to authenticated;
 
 -- Начальные разделы. Их можно переименовать или удалить в админке.
 insert into public.sections(id, kind, title, sort_order)
