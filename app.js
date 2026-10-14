@@ -31,16 +31,30 @@ function syncRoute(replace = false) {
 }
 readRoute();
 window.addEventListener('popstate', () => { readRoute(); render(); });
+function sshTarget(value) {
+  const match = String(value || '').trim().match(/^(?:([a-zA-Z0-9_][a-zA-Z0-9_.-]*)@)?([a-zA-Z0-9][a-zA-Z0-9.-]*)(?::(\d{1,5}))?$/);
+  if (!match || match[2].split('.').some(label => !label || label.startsWith('-') || label.endsWith('-'))) return null;
+  const port = Number(match[3] || 22);
+  if (port < 1 || port > 65535) return null;
+  if (/^[\d.]+$/.test(match[2]) && (match[2].split('.').length !== 4 || match[2].split('.').some(x => Number(x) > 255))) return null;
+  return { host: match[2], user: match[1] || '', port };
+}
+const remotePrograms = ['AnyDesk', 'RuDesktop', 'PuTTY', 'MobaXterm'];
+function canonicalProgram(value) {
+  const normalized = String(value || '').toLowerCase().replace(/[\s-]/g, '');
+  return remotePrograms.find(p => p.toLowerCase() === normalized) || ({энидеск:'AnyDesk',анидеск:'AnyDesk',рудесктоп:'RuDesktop'})[normalized] || '';
+}
 function remoteLink(item) {
   const tool = String(item.tool || '').toLowerCase().replace(/[\s-]/g, '');
   const id = String(item.remote_id || '').replace(/\s/g, '');
   if (['anydesk', 'энидеск', 'анидеск'].includes(tool) && /^[a-zA-Z0-9][a-zA-Z0-9@._-]{0,127}$/.test(id)) return { href: 'anydesk:' + id, label: 'Подключиться через AnyDesk' };
   if (['rudesktop', 'рудесктоп'].includes(tool) && /^\d{1,20}$/.test(id)) return { href: 'wikihmru-rudesktop:' + id, label: 'Подключиться через RuDesktop', setup: true };
+  if (['putty', 'mobaxterm'].includes(tool) && sshTarget(id)) return { href: 'wikihmru-' + tool + ':' + encodeURIComponent(id), label: 'Подключиться через ' + (tool === 'putty' ? 'PuTTY' : 'MobaXterm'), setup: true };
   return null;
 }
 function remoteActions(item) {
   const link = remoteLink(item);
-  return `<div class="detail-actions">${link ? `<a class="button-primary" href="${escapeHtml(link.href)}">${link.label}</a>` : ''}<button class="button-quiet" data-copy-remote="${escapeHtml(item.id)}">Скопировать ID</button></div>${link?.setup ? '<details><summary>Настроить запуск RuDesktop на Windows</summary><p>Скачайте установщик, запустите его в PowerShell и укажите путь к установленному RuDesktop. Настройка выполняется один раз на каждом компьютере.</p><a href="https://github.com/gekoowho/WikiHMRU/blob/main/scripts/install-remote-links.ps1" target="_blank" rel="noopener noreferrer">Открыть установщик</a></details>' : ''}`;
+  return `<div class="detail-actions">${link ? `<a class="button-primary" href="${escapeHtml(link.href)}">${link.label}</a>` : ''}<button class="button-quiet" data-copy-remote="${escapeHtml(item.id)}">Скопировать ID</button></div>${link?.setup ? '<details><summary>Настроить запуск приложения на Windows</summary><p>Скачайте установщик, запустите его в PowerShell и выберите программу и укажите путь к её исполняемому файлу. Настройка выполняется один раз на каждом компьютере.</p><a href="https://github.com/gekoowho/WikiHMRU/blob/main/scripts/install-remote-links.ps1" target="_blank" rel="noopener noreferrer">Открыть установщик</a></details>' : ''}`;
 }
 
 function toast(message) { const el = $('#toast'); el.textContent = message; el.classList.add('show'); clearTimeout(toastTimer); toastTimer = setTimeout(() => el.classList.remove('show'), 3800); }
@@ -59,7 +73,7 @@ function descendants(id) { const found = new Set([id]); let changed = true; whil
 function sectionName(id) { return db.sections.find(s => s.id === id)?.title || 'Без раздела'; }
 function sectionTrail(id) { const s = db.sections.find(x => x.id === id); return s ? ancestors(s).map(x => x.title).join(' / ') : 'Без раздела'; }
 function card(entry) {
-  const sec = sectionTrail(entry.section_id), excerpt = entry.summary || entry.blocks?.find(b => b.type === 'text')?.text || entry.device || 'Откройте запись';
+  const sec = sectionTrail(entry.section_id), excerpt = entry.type === 'access' ? [entry.tool, entry.remote_id].filter(Boolean).join(' · ') : entry.summary || entry.blocks?.find(b => b.type === 'text')?.text || entry.device || 'Откройте запись';
   return `<button class="entry-card" data-open="${escapeHtml(entry.id)}"><div class="card-top"><span class="badge ${escapeHtml(entry.type)}">${escapeHtml(rootNames[entry.type])}</span>${entry.visibility === 'admins' ? '<span class="private-chip">⌁ Только админам</span>' : ''}</div><h3>${escapeHtml(entry.title)}</h3><p>${escapeHtml(excerpt)}</p><div class="card-foot"><span>${escapeHtml(sec)}</span><span>${date(entry.updated_at)}</span></div></button>`;
 }
 function empty(message, kind) { return `<div class="empty-state"><div class="empty-icon">◇</div><h3>Пока здесь пусто</h3><p>${escapeHtml(message)}</p>${activeAdmin() ? `<button data-create="${kind}">Добавить запись</button>` : ''}</div>`; }
@@ -84,7 +98,7 @@ function listing(kind) {
   const sectionSet = sectionId ? descendants(sectionId) : null;
   const all = entriesFor(kind).filter(e => !sectionSet || sectionSet.has(e.section_id));
   const found = all.filter(e => [e.title,e.summary,e.device,e.tool,e.remote_id,...(e.blocks || []).map(b => b.text || b.caption)].join(' ').toLowerCase().includes(query.toLowerCase()));
-  return `<div class="page-heading"><div><span class="eyebrow">${escapeHtml(rootNames[kind]).toUpperCase()}</span><h1>${sectionId ? escapeHtml(sectionName(sectionId)) : escapeHtml(rootNames[kind])}</h1><p>${kind === 'knowledge' ? 'Проверенные инструкции для типовых задач.' : kind === 'cases' ? 'Разборы нестандартных ситуаций и решений.' : 'Устройства и ID подключений AnyDesk и RuDesktop.'}</p></div></div>
+  return `<div class="page-heading"><div><span class="eyebrow">${escapeHtml(rootNames[kind]).toUpperCase()}</span><h1>${sectionId ? escapeHtml(sectionName(sectionId)) : escapeHtml(rootNames[kind])}</h1><p>${kind === 'knowledge' ? 'Проверенные инструкции для типовых задач.' : kind === 'cases' ? 'Разборы нестандартных ситуаций и решений.' : 'Подключения через AnyDesk, RuDesktop, PuTTY и MobaXterm.'}</p></div></div>
   <div class="catalog-layout">${tree(kind)}<div class="catalog-main"><div class="toolbar"><label class="search-wrap"><span>⌕</span><input id="list-search" type="search" placeholder="Поиск в разделе..." value="${escapeHtml(query)}" aria-label="Поиск в разделе"></label>${activeAdmin() ? `<button class="new-button" data-create="${kind}">＋ Добавить</button>` : ''}</div>
   ${kind === 'access' ? '<div class="security-note compact">ID подключений доступны читателям. Пароли, ключи и одноразовые коды здесь не храните.</div>' : ''}
   <div id="list-results" class="list-grid">${found.length ? found.map(card).join('') : empty(all.length ? 'Ничего не найдено. Попробуйте другой запрос.' : 'В этом разделе пока нет записей.', kind)}</div></div></div>`;
@@ -106,9 +120,9 @@ function blockHtml(block) {
 function detail() {
   const item = db.entries.find(e => e.id === selectedId && visibleEntry(e)); if (!item) return '<button class="back-button" data-back>← Назад к списку</button><h1>Запись недоступна</h1><p>Она удалена или у вас нет доступа.</p>';
   const trail = sectionTrail(item.section_id);
-  return `<button class="back-button" data-back>← Назад к списку</button><article class="article"><div class="article-top"><span class="badge ${escapeHtml(item.type)}">${escapeHtml(rootNames[item.type])}</span>${item.visibility === 'admins' ? '<span class="private-chip">⌁ Только админам</span>' : ''}</div><h1>${escapeHtml(item.title)}</h1><div class="article-meta">${escapeHtml(trail)} · Обновлено ${date(item.updated_at)}</div>${item.summary ? `<p class="article-lead">${escapeHtml(item.summary)}</p>` : ''}
-  ${item.type === 'access' ? `<div class="access-info"><div><small>ПРОГРАММА</small><strong>${escapeHtml(item.tool || '—')}</strong></div><div><small>УСТРОЙСТВО</small><strong>${escapeHtml(item.device || '—')}</strong></div><div><small>ID ПОДКЛЮЧЕНИЯ</small><strong>${escapeHtml(item.remote_id || '—')}</strong></div></div>${remoteActions(item)}` : ''}
-  <div class="article-body">${(item.blocks || []).map((b, i) => blockHtml({ ...b, id: String(i) })).join('') || '<p class="article-muted">Материал пока не заполнен.</p>'}</div>
+  return `<button class="back-button" data-back>← Назад к списку</button><article class="article"><div class="article-top"><span class="badge ${escapeHtml(item.type)}">${escapeHtml(rootNames[item.type])}</span>${item.visibility === 'admins' ? '<span class="private-chip">⌁ Только админам</span>' : ''}</div><h1>${escapeHtml(item.title)}</h1><div class="article-meta">${escapeHtml(trail)} · Обновлено ${date(item.updated_at)}</div>${item.type !== 'access' && item.summary ? `<p class="article-lead">${escapeHtml(item.summary)}</p>` : ''}
+  ${item.type === 'access' ? `<div class="access-info"><div><small>ПРОГРАММА</small><strong>${escapeHtml(item.tool || '—')}</strong></div><div><small>АДРЕС / ID</small><strong>${escapeHtml(item.remote_id || '—')}</strong></div></div>${remoteActions(item)}` : ''}
+  <div class="article-body">${(item.type === 'access' ? [] : item.blocks || []).map((b, i) => blockHtml({ ...b, id: String(i) })).join('') || (item.type === 'access' ? '' : '<p class="article-muted">Материал пока не заполнен.</p>')}</div>
   ${activeAdmin() ? `<div class="detail-actions"><button class="button-quiet" data-edit-entry="${escapeHtml(item.id)}">Редактировать</button><button class="button-quiet" data-history="${escapeHtml(item.id)}">История изменений</button><button class="button-danger" data-delete-entry="${escapeHtml(item.id)}">Удалить</button></div><div id="history-panel"></div>` : ''}</article>`;
 }
 function admin() {
@@ -174,10 +188,17 @@ function openEditor(kind, id = null) {
   editingId = id; editorKind = kind; pendingFiles = new Map();
   draftBlocks = (item.blocks || []).map(b => ({ ...b, client_id: uuid() }));
   $('#dialog-title').textContent = id ? 'Редактировать запись' : 'Новая запись';
+  if (kind === 'access') {
+    const program = canonicalProgram(item.tool) || 'AnyDesk';
+    const selectedSection = item.section_id || (view === 'access' ? sectionId : null) || '';
+    $('#editor-fields').innerHTML = `<div class="editor-top-grid">${field('title','Имя',item.title,{required:true,placeholder:'Например, сервер бухгалтерии'})}<label class="field"><span>Программа</span><select name="tool">${remotePrograms.map(p => `<option value="${p}" ${p === program ? 'selected' : ''}>${p}</option>`).join('')}</select></label>${field('remote_id','Адрес / ID подключения',item.remote_id,{required:true,placeholder:'192.168.1.10 или ID подключения'})}<label class="field"><span>Доступ</span><select name="visibility"><option value="all" ${item.visibility !== 'admins' && !privateParent ? 'selected' : ''}>Все читатели</option><option value="admins" ${item.visibility === 'admins' || privateParent ? 'selected' : ''}>Только администраторы</option></select></label><input type="hidden" name="section_id" value="${escapeHtml(selectedSection)}"></div><p class="muted">Для SSH: IP или имя сервера; можно указать user@host:port. По умолчанию порт 22.</p>`;
+  } else {
   $('#editor-fields').innerHTML = `<div class="editor-top-grid">${field('title','Название',item.title,{required:true,placeholder:'Короткое понятное название'})}${field('summary','Краткое описание',item.summary,{placeholder:'О чём материал'})}<label class="field"><span>Раздел</span><select name="section_id">${sectionOptions(kind,item.section_id)}</select></label><label class="field"><span>Доступ</span><select name="visibility"><option value="all" ${item.visibility !== 'admins' && !privateParent ? 'selected' : ''}>Все читатели</option><option value="admins" ${item.visibility === 'admins' || privateParent ? 'selected' : ''}>Только администраторы</option></select></label></div>
   ${kind === 'access' ? `<div class="editor-top-grid">${field('tool','Программа',item.tool,{placeholder:'AnyDesk или RuDesktop'})}${field('device','Устройство / пользователь',item.device)}${field('remote_id','ID подключения',item.remote_id)}</div><div class="security-note compact">ID доступен читателям, если запись открыта для всех. Не добавляйте пароли, ключи и одноразовые коды.</div>` : ''}
   <div class="block-area"><div class="block-area-head"><div><strong>Содержание</strong><p>Соберите карточку из блоков в нужном порядке.</p></div></div><div id="blocks-list"></div><div class="block-toolbar">${Object.entries(blockNames).map(([type,label]) => `<button type="button" data-add-block="${type}">＋ ${label}</button>`).join('')}</div></div>`;
-  renderBlocks(); $('#editor-dialog').showModal(); $('#editor-form [name=title]').focus();
+    renderBlocks();
+  }
+  $('#editor-dialog').showModal(); $('#editor-form [name=title]').focus();
 }
 function openSection(kind, id = null, parent = null) {
   if (!activeAdmin()) return;
@@ -274,11 +295,15 @@ $('#editor-form').addEventListener('submit', async event => {
   const forcedPrivate = privateSection && ancestors(privateSection).some(s => s.visibility === 'admins');
   const base = { id, type: editorKind, section_id: data.section_id || null, title: data.title.trim(), summary: (data.summary || '').trim(), visibility: forcedPrivate ? 'admins' : data.visibility, tool: (data.tool || '').trim(), device: (data.device || '').trim(), remote_id: (data.remote_id || '').trim(), author_id: old?.author_id || db.user?.id || null };
   if (!base.title) return;
+  if (editorKind === 'access') {
+    base.summary = old?.summary || ''; base.device = old?.device || '';
+    if (!remoteLink(base)) { toast('Проверьте программу и адрес / ID подключения'); return; }
+  }
   const button = form.querySelector('[type=submit]'); button.disabled = true;
   try {
-    const blocks = draftBlocks.map(({ type,text,caption,path,href }) => ({ type, text: text || '', caption: caption || '', path: path || '', href: href || '' }));
-    if (blocks.some(b => b.type === 'link' && !safeUrl(b.href))) throw Error('Укажите полный адрес ссылки с https:// или http://');
-    const uploads = draftBlocks.map((b,i) => ({ file: pendingFiles.get(b.client_id), i })).filter(x => x.file);
+    const blocks = editorKind === 'access' ? (old?.blocks || []) : draftBlocks.map(({ type,text,caption,path,href }) => ({ type, text: text || '', caption: caption || '', path: path || '', href: href || '' }));
+    if (editorKind !== 'access' && blocks.some(b => b.type === 'link' && !safeUrl(b.href))) throw Error('Укажите полный адрес ссылки с https:// или http://');
+    const uploads = (editorKind === 'access' ? [] : draftBlocks).map((b,i) => ({ file: pendingFiles.get(b.client_id), i })).filter(x => x.file);
     if (db.cloud && !editingId && uploads.length) await db.saveEntry({ ...base, blocks: blocks.filter((_,i) => !uploads.some(u => u.i === i)) });
     for (const { file, i } of uploads) blocks[i].path = await db.uploadImage(id, file);
     await db.saveEntry({ ...base, blocks });
