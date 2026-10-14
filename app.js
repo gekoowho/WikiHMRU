@@ -89,22 +89,67 @@ function home() {
   ${!db.cloud ? '<div class="security-note">Локальная версия: записи видны только в этом браузере. Для общей базы подключите Supabase.</div>' : ''}
   ${readerPreview ? '<div class="security-note">Режим просмотра читателя. Закрытые разделы и статьи скрыты. <button class="text-link" data-exit-preview>Вернуться в админку</button></div>' : ''}
   <div class="search-hero"><span class="eyebrow">ПОИСК</span><h2>Поиск по материалам</h2><div class="hero-search"><span>⌕</span><input id="home-search" type="search" placeholder="Задача, программа, ошибка или устройство..." aria-label="Поиск по всей вики"><button data-search>Найти</button></div><p>Статьи, сложные случаи и подключения.</p></div>
-  <div class="stats-grid">${[['knowledge','Статей','▤'],['cases','Сложных случаев','◇'],['access','Подключений','⌁']].map(([kind,label,icon]) => `<button class="stat-card" data-view="${kind}"><div><strong>${entriesFor(kind).length}</strong><span>${label}</span></div><div class="stat-icon">${icon}</div></button>`).join('')}</div>
+  <div id="home-search-results" hidden aria-live="polite"></div><div class="stats-grid">${[['knowledge','Статей','▤'],['cases','Сложных случаев','◇'],['access','Подключений','⌁']].map(([kind,label,icon]) => `<button class="stat-card" data-view="${kind}"><div><strong>${entriesFor(kind).length}</strong><span>${label}</span></div><div class="stat-icon">${icon}</div></button>`).join('')}</div>
   <div class="section-heading"><h2>Разделы</h2>${activeAdmin() ? '<button class="text-link" data-view="admin">Управлять разделами →</button>' : ''}</div>
   <div class="root-grid">${['knowledge','cases','access'].map(kind => `<button class="root-card" data-view="${kind}"><span class="root-icon ${kind}">${kind === 'knowledge' ? '▤' : kind === 'cases' ? '◇' : '⌁'}</span><strong>${rootNames[kind]}</strong><small>${sectionsFor(kind).filter(s => !s.parent_id).length} разделов</small><span class="root-arrow">→</span></button>`).join('')}</div>
   <div class="section-heading recent-title"><h2>Последние обновления</h2></div><div class="card-grid">${recent.length ? recent.map(card).join('') : empty('Здесь появятся новые материалы.', 'knowledge')}</div>`;
 }
+function normalizeSearch(value) { return String(value || '').normalize('NFKC').toLowerCase().replace(/ё/g, 'е'); }
+function editDistance(a, b) {
+  const rows = [Array.from({length:b.length + 1}, (_, i) => i)];
+  for (let i = 1; i <= a.length; i++) {
+    const row = [i];
+    for (let j = 1; j <= b.length; j++) {
+      row[j] = Math.min(rows[i-1][j]+1, row[j-1]+1, rows[i-1][j-1]+(a[i-1] === b[j-1] ? 0 : 1));
+      if (i > 1 && j > 1 && a[i-1] === b[j-2] && a[i-2] === b[j-1]) row[j] = Math.min(row[j], rows[i-2][j-2]+1);
+    }
+    rows.push(row);
+  }
+  return rows[a.length][b.length];
+}
+function searchTokenScore(text, token) {
+  if (text.includes(token)) return 0;
+  if (token.length < 3 || token.length > 64 || /^\d+$/.test(token)) return Infinity;
+  const limit = token.length >= 7 ? 2 : 1;
+  let best = Infinity;
+  for (const word of text.match(/[\p{L}\p{N}]+/gu) || []) {
+    // Compare the typed prefix too, so an unfinished word can contain a typo.
+    for (let length = Math.max(1, token.length-limit); length <= Math.min(word.length, token.length+limit); length++) {
+      if (editDistance(token, word.slice(0,length)) <= limit) best = 2;
+    }
+    if (best !== Infinity) break;
+  }
+  return best;
+}
+function searchEntries(entries, value = query) {
+  const normalized = normalizeSearch(value).trim();
+  if (!normalized) return entries;
+  const latin = "qwertyuiop[]asdfghjkl;'zxcvbnm,.", russian = 'йцукенгшщзхъфывапролджэячсмитьбю';
+  const switched = [...normalized].map(c => { const i=latin.indexOf(c), j=russian.indexOf(c); return i >= 0 ? russian[i] : j >= 0 ? latin[j] : c; }).join('');
+  const variants = [...new Set([normalized,switched])].map(v => v.match(/[\p{L}\p{N}]+/gu) || []);
+  return entries.map((entry, index) => {
+    const title = normalizeSearch(entry.title);
+    const text = normalizeSearch([entry.title,entry.summary,entry.device,entry.tool,entry.remote_id,sectionTrail(entry.section_id),...(entry.blocks || []).map(b => b.text || b.caption)].join(' '));
+    let score = Infinity;
+    for (const tokens of variants) {
+      if (!tokens.length) continue;
+      const scores = tokens.map(token => Math.min(searchTokenScore(title,token), searchTokenScore(text,token)+1));
+      score = Math.min(score, scores.reduce((sum,n) => sum+n,0));
+    }
+    return {entry,score,index};
+  }).filter(x => Number.isFinite(x.score)).sort((a,b) => a.score-b.score || a.index-b.index).map(x => x.entry);
+}
 function listing(kind) {
   const sectionSet = sectionId ? descendants(sectionId) : null;
   const all = entriesFor(kind).filter(e => !sectionSet || sectionSet.has(e.section_id));
-  const found = all.filter(e => [e.title,e.summary,e.device,e.tool,e.remote_id,...(e.blocks || []).map(b => b.text || b.caption)].join(' ').toLowerCase().includes(query.toLowerCase()));
+  const found = searchEntries(all);
   return `<div class="page-heading"><div><span class="eyebrow">${escapeHtml(rootNames[kind]).toUpperCase()}</span><h1>${sectionId ? escapeHtml(sectionName(sectionId)) : escapeHtml(rootNames[kind])}</h1><p>${kind === 'knowledge' ? 'Проверенные инструкции для типовых задач.' : kind === 'cases' ? 'Разборы нестандартных ситуаций и решений.' : 'Подключения через AnyDesk, RuDesktop, PuTTY и MobaXterm.'}</p></div></div>
   <div class="catalog-layout">${tree(kind)}<div class="catalog-main"><div class="toolbar"><label class="search-wrap"><span>⌕</span><input id="list-search" type="search" placeholder="Поиск в разделе..." value="${escapeHtml(query)}" aria-label="Поиск в разделе"></label>${activeAdmin() ? `<button class="new-button" data-create="${kind}">＋ Добавить</button>` : ''}</div>
   ${kind === 'access' ? '<div class="security-note compact">ID подключений доступны читателям. Пароли, ключи и одноразовые коды здесь не храните.</div>' : ''}
   <div id="list-results" class="list-grid">${found.length ? found.map(card).join('') : empty(all.length ? 'Ничего не найдено. Попробуйте другой запрос.' : 'В этом разделе пока нет записей.', kind)}</div></div></div>`;
 }
 function searchResults() {
-  const found = db.entries.filter(visibleEntry).filter(e => [e.title,e.summary,e.device,e.tool,e.remote_id,sectionTrail(e.section_id),...(e.blocks || []).map(b => b.text || b.caption)].join(' ').toLowerCase().includes(query.toLowerCase()));
+  const found = searchEntries(db.entries.filter(visibleEntry));
   return `<div class="page-heading"><div><span class="eyebrow">ПОИСК ПО ВСЕЙ ВИКИ</span><h1>Результаты поиска</h1><p>Найдено: ${found.length}</p></div></div><div class="toolbar"><label class="search-wrap"><span>⌕</span><input id="global-search" type="search" value="${escapeHtml(query)}" placeholder="Что ищем?" aria-label="Поиск по всей вики"></label></div><div id="search-results" class="list-grid">${found.length ? found.map(card).join('') : empty('По вашему запросу записей нет.', 'knowledge')}</div>`;
 }
 function blockHtml(block) {
@@ -194,7 +239,6 @@ function openEditor(kind, id = null) {
     $('#editor-fields').innerHTML = `<div class="editor-top-grid">${field('title','Имя',item.title,{required:true,placeholder:'Например, сервер бухгалтерии'})}<label class="field"><span>Программа</span><select name="tool">${remotePrograms.map(p => `<option value="${p}" ${p === program ? 'selected' : ''}>${p}</option>`).join('')}</select></label>${field('remote_id','Адрес / ID подключения',item.remote_id,{required:true,placeholder:'192.168.1.10 или ID подключения'})}<label class="field"><span>Доступ</span><select name="visibility"><option value="all" ${item.visibility !== 'admins' && !privateParent ? 'selected' : ''}>Все читатели</option><option value="admins" ${item.visibility === 'admins' || privateParent ? 'selected' : ''}>Только администраторы</option></select></label><input type="hidden" name="section_id" value="${escapeHtml(selectedSection)}"></div><p class="muted">Для SSH: IP или имя сервера; можно указать user@host:port. По умолчанию порт 22.</p>`;
   } else {
   $('#editor-fields').innerHTML = `<div class="editor-top-grid">${field('title','Название',item.title,{required:true,placeholder:'Короткое понятное название'})}${field('summary','Краткое описание',item.summary,{placeholder:'О чём материал'})}<label class="field"><span>Раздел</span><select name="section_id">${sectionOptions(kind,item.section_id)}</select></label><label class="field"><span>Доступ</span><select name="visibility"><option value="all" ${item.visibility !== 'admins' && !privateParent ? 'selected' : ''}>Все читатели</option><option value="admins" ${item.visibility === 'admins' || privateParent ? 'selected' : ''}>Только администраторы</option></select></label></div>
-  ${kind === 'access' ? `<div class="editor-top-grid">${field('tool','Программа',item.tool,{placeholder:'AnyDesk или RuDesktop'})}${field('device','Устройство / пользователь',item.device)}${field('remote_id','ID подключения',item.remote_id)}</div><div class="security-note compact">ID доступен читателям, если запись открыта для всех. Не добавляйте пароли, ключи и одноразовые коды.</div>` : ''}
   <div class="block-area"><div class="block-area-head"><div><strong>Содержание</strong><p>Соберите карточку из блоков в нужном порядке.</p></div></div><div id="blocks-list"></div><div class="block-toolbar">${Object.entries(blockNames).map(([type,label]) => `<button type="button" data-add-block="${type}">＋ ${label}</button>`).join('')}</div></div>`;
     renderBlocks();
   }
@@ -218,12 +262,12 @@ function updateListSearch() {
   const target = $('#list-results'); if (!target) return;
   const set = sectionId ? descendants(sectionId) : null;
   const all = entriesFor(view).filter(e => !set || set.has(e.section_id));
-  const found = all.filter(e => [e.title,e.summary,e.device,e.tool,e.remote_id,...(e.blocks || []).map(b => b.text || b.caption)].join(' ').toLowerCase().includes(query.toLowerCase()));
+  const found = searchEntries(all);
   target.innerHTML = found.length ? found.map(card).join('') : empty('Ничего не найдено.', view);
 }
 function updateGlobalSearch() {
   const target = $('#search-results'); if (!target) return;
-  const found = db.entries.filter(visibleEntry).filter(e => [e.title,e.summary,e.device,e.tool,e.remote_id,sectionTrail(e.section_id),...(e.blocks || []).map(b => b.text || b.caption)].join(' ').toLowerCase().includes(query.toLowerCase()));
+  const found = searchEntries(db.entries.filter(visibleEntry));
   target.innerHTML = found.length ? found.map(card).join('') : empty('По вашему запросу записей нет.', 'knowledge');
 }
 document.addEventListener('click', async event => {
@@ -256,6 +300,7 @@ document.addEventListener('click', async event => {
   if (button.id === 'logout-button') { await db.logout(); readerPreview = false; go('home'); render(); return; }
 });
 $('#content').addEventListener('input', event => {
+  if (event.target.id === 'home-search') { const target = $('#home-search-results'); const value = event.target.value.trim(); target.hidden = !value; const found = value ? searchEntries(db.entries.filter(visibleEntry), value) : []; target.innerHTML = value ? `<p>Найдено: ${found.length}</p><div class="card-grid">${found.slice(0,6).map(card).join('') || '<p>Ничего не найдено. Попробуйте другое слово.</p>'}</div>` : ''; }
   if (event.target.id === 'list-search') { query = event.target.value; syncRoute(true); updateListSearch(); }
   if (event.target.id === 'global-search') { query = event.target.value; syncRoute(true); updateGlobalSearch(); }
 });
