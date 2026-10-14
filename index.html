@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; style-src-attr 'unsafe-inline'; font-src 'self'; connect-src 'self' https://*.supabase.co; img-src 'self' blob: data:; object-src 'none'; base-uri 'self'; form-action 'self'" />
+    <meta name="theme-color" content="#171e28" />
+    <meta name="description" content="Рабочая база знаний специалиста технической поддержки" />
+    <title>WikiHMRU — вики техподдержки</title>
+    <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
+    <link rel="stylesheet" href="./styles.css" />
+    <script src="./config.js" defer></script>
+    <script src="./store.js" defer></script>
+    <script src="./app.js" defer></script>
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar">
+        <div class="brand"><div class="brand-mark" aria-hidden="true">W</div><div><strong>WikiHMRU</strong><small>Техническая поддержка</small></div></div>
+        <div class="workspace-label">НАВИГАЦИЯ</div>
+        <nav class="side-nav" aria-label="Разделы">
+          <button data-view="home" class="nav-item active"><span class="nav-icon">⌂</span> Обзор</button>
+          <button data-view="knowledge" class="nav-item"><span class="nav-icon">▤</span> База знаний <span id="nav-knowledge-count" class="nav-count"></span></button>
+          <button data-view="cases" class="nav-item"><span class="nav-icon">◇</span> Сложные случаи <span id="nav-cases-count" class="nav-count"></span></button>
+          <button data-view="access" class="nav-item"><span class="nav-icon">⌁</span> Удалённый доступ <span id="nav-access-count" class="nav-count"></span></button>
+          <button data-view="admin" class="nav-item" id="admin-nav" hidden><span class="nav-icon">⚙</span> Управление</button>
+        </nav>
+        <div class="sidebar-bottom">
+          <button id="export-button" class="sidebar-action">↓ &nbsp; Скачать копию данных</button>
+          <button id="import-button" class="sidebar-action">↑ &nbsp; Загрузить копию</button>
+          <input id="import-file" type="file" accept="application/json,.json" hidden />
+          <div class="sidebar-foot">Локальная версия · данные в браузере</div>
+        </div>
+      </aside>
+      <main class="main-area">
+        <header class="topbar"><div class="breadcrumb">Рабочее пространство <span>/</span> <strong id="breadcrumb-current">Обзор</strong></div><div class="top-actions"><span class="today" id="today"></span><button class="theme-button" id="theme-toggle" type="button" aria-label="Переключить тему" title="Переключить тему">◐</button><button class="new-button" id="new-button"><span>＋</span> Новая запись</button></div></header>
+        <div class="content" id="content"></div>
+      </main>
+    </div>
+    <dialog id="editor-dialog" class="editor-dialog">
+      <form id="editor-form" method="dialog" novalidate>
+        <div class="dialog-head"><div><span class="eyebrow">РАБОЧАЯ ВИКИ</span><h2 id="dialog-title">Новая запись</h2></div><button type="button" class="icon-button" id="close-dialog" aria-label="Закрыть">×</button></div>
+        <div id="editor-fields"></div>
+        <div class="dialog-actions"><button type="button" class="button-quiet" id="cancel-dialog">Отмена</button><button type="submit" class="button-primary">Сохранить запись</button></div>
+      </form>
+    </dialog>
+    <dialog id="section-dialog" class="editor-dialog">
+      <form id="section-form" method="dialog">
+        <div class="dialog-head"><div><span class="eyebrow">СТРУКТУРА ВИКИ</span><h2 id="section-dialog-title">Новый раздел</h2></div><button type="button" class="icon-button" data-close-section aria-label="Закрыть">×</button></div>
+        <div id="section-fields"></div>
+        <div class="dialog-actions"><button type="button" class="button-quiet" data-close-section>Отмена</button><button type="submit" class="button-primary">Сохранить раздел</button></div>
+      </form>
+    </dialog>
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  </body>
+</html>

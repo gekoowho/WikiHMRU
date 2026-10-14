@@ -1,0 +1,284 @@
+(() => {
+'use strict';
+const db = window.wikiStore;
+const $ = selector => document.querySelector(selector);
+const escapeHtml = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]);
+const safeUrl = value => { if (!/^https?:\/\//i.test(String(value || '').trim())) return ''; try { const url = new URL(value); return ['http:','https:'].includes(url.protocol) ? url.href : ''; } catch { return ''; } };
+const uuid = () => crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) + Math.random().toString(36).slice(2);
+const date = value => { const d = new Date(value); return Number.isNaN(d.getTime()) ? '—' : new Intl.DateTimeFormat('ru-RU', { day: 'numeric', month: 'short', year: 'numeric' }).format(d); };
+const dateTime = value => { const d = new Date(value); return Number.isNaN(d.getTime()) ? '—' : new Intl.DateTimeFormat('ru-RU', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }).format(d); };
+const rootNames = { knowledge: 'База знаний', cases: 'Сложные случаи', access: 'Удалённый доступ', home: 'Обзор', admin: 'Управление', search: 'Поиск' };
+const blockNames = { heading: 'Заголовок', text: 'Текст', code: 'Код', quote: 'Цитата / заметка', list: 'Список', image: 'Фото', link: 'Ссылка' };
+let view = 'home', sectionId = null, selectedId = null, query = '', editingId = null, editorKind = 'knowledge';
+let draftBlocks = [], pendingFiles = new Map(), versions = null, adminTab = 'sections', readerPreview = false, toastTimer;
+const activeAdmin = () => db.isAdmin() && !readerPreview;
+function toast(message) { const el = $('#toast'); el.textContent = message; el.classList.add('show'); clearTimeout(toastTimer); toastTimer = setTimeout(() => el.classList.remove('show'), 3800); }
+function theme(mode) { document.documentElement.dataset.theme = mode; localStorage.setItem('opora-theme', mode); $('#theme-toggle').textContent = mode === 'dark' ? '☀' : '☾'; $('#theme-toggle').title = mode === 'dark' ? 'Светлая тема' : 'Тёмная тема'; }
+theme(localStorage.getItem('opora-theme') === 'dark' ? 'dark' : 'light');
+function ancestors(section) {
+  const result = [], seen = new Set(); let current = section;
+  while (current && !seen.has(current.id)) { result.unshift(current); seen.add(current.id); current = db.sections.find(s => s.id === current.parent_id); }
+  return result;
+}
+function visibleSection(section) { return activeAdmin() || (!ancestors(section).some(s => s.visibility === 'admins')); }
+function visibleEntry(entry) { return activeAdmin() || (entry.visibility !== 'admins' && (!entry.section_id || visibleSection(db.sections.find(s => s.id === entry.section_id) || { id: '', visibility: 'admins' }))); }
+function sectionsFor(kind) { return db.sections.filter(s => s.kind === kind && visibleSection(s)); }
+function entriesFor(kind) { return db.entries.filter(e => e.type === kind && visibleEntry(e)); }
+function descendants(id) { const found = new Set([id]); let changed = true; while (changed) { changed = false; for (const s of db.sections) if (s.parent_id && found.has(s.parent_id) && !found.has(s.id)) { found.add(s.id); changed = true; } } return found; }
+function sectionName(id) { return db.sections.find(s => s.id === id)?.title || 'Без раздела'; }
+function sectionTrail(id) { const s = db.sections.find(x => x.id === id); return s ? ancestors(s).map(x => x.title).join(' / ') : 'Без раздела'; }
+function card(entry) {
+  const sec = sectionTrail(entry.section_id), excerpt = entry.summary || entry.blocks?.find(b => b.type === 'text')?.text || entry.device || 'Откройте запись';
+  return `<button class="entry-card" data-open="${escapeHtml(entry.id)}"><div class="card-top"><span class="badge ${escapeHtml(entry.type)}">${escapeHtml(rootNames[entry.type])}</span>${entry.visibility === 'admins' ? '<span class="private-chip">⌁ Только админам</span>' : ''}</div><h3>${escapeHtml(entry.title)}</h3><p>${escapeHtml(excerpt)}</p><div class="card-foot"><span>${escapeHtml(sec)}</span><span>${date(entry.updated_at)}</span></div></button>`;
+}
+function empty(message, kind) { return `<div class="empty-state"><div class="empty-icon">◇</div><h3>Пока здесь пусто</h3><p>${escapeHtml(message)}</p>${activeAdmin() ? `<button data-create="${kind}">Добавить запись</button>` : ''}</div>`; }
+function tree(kind, selected = sectionId, admin = false) {
+  const sections = admin ? db.sections.filter(s => s.kind === kind) : sectionsFor(kind);
+  const children = parent => sections.filter(s => (s.parent_id || null) === parent).sort((a,b) => a.sort_order - b.sort_order || a.title.localeCompare(b.title));
+  const branch = (parent, depth = 0) => children(parent).map(s => `<div class="tree-row" style="--depth:${depth}"><button class="tree-item ${selected === s.id ? 'selected' : ''}" data-section="${escapeHtml(s.id)}" data-kind="${kind}"><span class="tree-symbol">${children(s.id).length ? '▾' : '·'}</span><span>${escapeHtml(s.title)}</span>${admin && ancestors(s).some(x => x.visibility === 'admins') ? '<span class="private-dot" title="Только админам">●</span>' : ''}</button>${admin ? `<button class="tree-edit" data-edit-section="${escapeHtml(s.id)}" aria-label="Редактировать ${escapeHtml(s.title)}">✎</button>` : ''}</div>${branch(s.id, depth + 1)}`).join('');
+  return `<div class="section-tree"><div class="tree-title">РАЗДЕЛЫ</div><button class="tree-item root ${selected === null ? 'selected' : ''}" data-section="all" data-kind="${kind}">Все записи</button>${branch(null)}${admin || activeAdmin() ? `<button class="add-section" data-new-section="${kind}" data-parent="${selected || ''}">＋ Новый раздел</button>` : ''}</div>`;
+}
+function home() {
+  const recent = db.entries.filter(visibleEntry).sort((a,b) => new Date(b.updated_at) - new Date(a.updated_at)).slice(0,4);
+  return `<div class="page-heading"><div><span class="eyebrow">РАБОЧАЯ ВИКИ</span><h1>База знаний техподдержки</h1><p>Инструкции, сложные случаи и удалённые подключения команды.</p></div></div>
+  ${!db.cloud ? '<div class="security-note">Локальная версия: записи видны только в этом браузере. Для общей базы подключите Supabase.</div>' : ''}
+  ${readerPreview ? '<div class="security-note">Режим просмотра читателя. Закрытые разделы и статьи скрыты. <button class="text-link" data-exit-preview>Вернуться в админку</button></div>' : ''}
+  <div class="search-hero"><span class="eyebrow">ПОИСК</span><h2>Поиск по материалам</h2><div class="hero-search"><span>⌕</span><input id="home-search" type="search" placeholder="Задача, программа, ошибка или устройство..." aria-label="Поиск по всей вики"><button data-search>Найти</button></div><p>Статьи, сложные случаи и подключения.</p></div>
+  <div class="stats-grid">${[['knowledge','Статей','▤'],['cases','Сложных случаев','◇'],['access','Подключений','⌁']].map(([kind,label,icon]) => `<button class="stat-card" data-view="${kind}"><div><strong>${entriesFor(kind).length}</strong><span>${label}</span></div><div class="stat-icon">${icon}</div></button>`).join('')}</div>
+  <div class="section-heading"><h2>Разделы</h2>${activeAdmin() ? '<button class="text-link" data-view="admin">Управлять разделами →</button>' : ''}</div>
+  <div class="root-grid">${['knowledge','cases','access'].map(kind => `<button class="root-card" data-view="${kind}"><span class="root-icon ${kind}">${kind === 'knowledge' ? '▤' : kind === 'cases' ? '◇' : '⌁'}</span><strong>${rootNames[kind]}</strong><small>${sectionsFor(kind).filter(s => !s.parent_id).length} разделов</small><span class="root-arrow">→</span></button>`).join('')}</div>
+  <div class="section-heading recent-title"><h2>Последние обновления</h2></div><div class="card-grid">${recent.length ? recent.map(card).join('') : empty('Здесь появятся новые материалы.', 'knowledge')}</div>`;
+}
+function listing(kind) {
+  const sectionSet = sectionId ? descendants(sectionId) : null;
+  const all = entriesFor(kind).filter(e => !sectionSet || sectionSet.has(e.section_id));
+  const found = all.filter(e => [e.title,e.summary,e.device,e.tool,e.remote_id,...(e.blocks || []).map(b => b.text || b.caption)].join(' ').toLowerCase().includes(query.toLowerCase()));
+  return `<div class="page-heading"><div><span class="eyebrow">${escapeHtml(rootNames[kind]).toUpperCase()}</span><h1>${sectionId ? escapeHtml(sectionName(sectionId)) : escapeHtml(rootNames[kind])}</h1><p>${kind === 'knowledge' ? 'Проверенные инструкции для типовых задач.' : kind === 'cases' ? 'Разборы нестандартных ситуаций и решений.' : 'Устройства и ID подключений AnyDesk и RuDesktop.'}</p></div></div>
+  <div class="catalog-layout">${tree(kind)}<div class="catalog-main"><div class="toolbar"><label class="search-wrap"><span>⌕</span><input id="list-search" type="search" placeholder="Поиск в разделе..." value="${escapeHtml(query)}" aria-label="Поиск в разделе"></label>${activeAdmin() ? `<button class="new-button" data-create="${kind}">＋ Добавить</button>` : ''}</div>
+  ${kind === 'access' ? '<div class="security-note compact">ID подключений доступны читателям. Пароли, ключи и одноразовые коды здесь не храните.</div>' : ''}
+  <div id="list-results" class="list-grid">${found.length ? found.map(card).join('') : empty(all.length ? 'Ничего не найдено. Попробуйте другой запрос.' : 'В этом разделе пока нет записей.', kind)}</div></div></div>`;
+}
+function searchResults() {
+  const found = db.entries.filter(visibleEntry).filter(e => [e.title,e.summary,e.device,e.tool,e.remote_id,sectionTrail(e.section_id),...(e.blocks || []).map(b => b.text || b.caption)].join(' ').toLowerCase().includes(query.toLowerCase()));
+  return `<div class="page-heading"><div><span class="eyebrow">ПОИСК ПО ВСЕЙ ВИКИ</span><h1>Результаты поиска</h1><p>Найдено: ${found.length}</p></div></div><div class="toolbar"><label class="search-wrap"><span>⌕</span><input id="global-search" type="search" value="${escapeHtml(query)}" placeholder="Что ищем?" aria-label="Поиск по всей вики"></label></div><div id="search-results" class="list-grid">${found.length ? found.map(card).join('') : empty('По вашему запросу записей нет.', 'knowledge')}</div>`;
+}
+function blockHtml(block) {
+  if (block.type === 'heading') return `<h2 class="article-heading">${escapeHtml(block.text)}</h2>`;
+  if (block.type === 'text') return `<p class="article-text">${escapeHtml(block.text)}</p>`;
+  if (block.type === 'code') return `<div class="code-block"><div class="code-label">КОД <button data-copy-code="${escapeHtml(block.id || '')}">Скопировать</button></div><pre><code>${escapeHtml(block.text)}</code></pre></div>`;
+  if (block.type === 'quote') return `<blockquote>${escapeHtml(block.text)}</blockquote>`;
+  if (block.type === 'list') return `<ul class="article-list">${String(block.text || '').split('\n').filter(Boolean).map(line => `<li>${escapeHtml(line)}</li>`).join('')}</ul>`;
+  if (block.type === 'image') return block.path ? `<figure class="article-image"><img data-image-path="${escapeHtml(block.path)}" alt="${escapeHtml(block.caption || 'Фото к статье')}"><figcaption>${escapeHtml(block.caption)}</figcaption></figure>` : '';
+  if (block.type === 'link') { const href = safeUrl(block.href); return href ? `<p class="article-link"><a href="${escapeHtml(href)}" target="_blank" rel="noopener noreferrer">↗ ${escapeHtml(block.text || href)}</a></p>` : ''; }
+  return '';
+}
+function detail() {
+  const item = db.entries.find(e => e.id === selectedId && visibleEntry(e)); if (!item) { selectedId = null; return listing(view); }
+  const trail = sectionTrail(item.section_id);
+  return `<button class="back-button" data-back>← Назад к списку</button><article class="article"><div class="article-top"><span class="badge ${escapeHtml(item.type)}">${escapeHtml(rootNames[item.type])}</span>${item.visibility === 'admins' ? '<span class="private-chip">⌁ Только админам</span>' : ''}</div><h1>${escapeHtml(item.title)}</h1><div class="article-meta">${escapeHtml(trail)} · Обновлено ${date(item.updated_at)}</div>${item.summary ? `<p class="article-lead">${escapeHtml(item.summary)}</p>` : ''}
+  ${item.type === 'access' ? `<div class="access-info"><div><small>ПРОГРАММА</small><strong>${escapeHtml(item.tool || '—')}</strong></div><div><small>УСТРОЙСТВО</small><strong>${escapeHtml(item.device || '—')}</strong></div><div><small>ID ПОДКЛЮЧЕНИЯ</small><strong>${escapeHtml(item.remote_id || '—')}</strong></div></div>` : ''}
+  <div class="article-body">${(item.blocks || []).map((b, i) => blockHtml({ ...b, id: String(i) })).join('') || '<p class="article-muted">Материал пока не заполнен.</p>'}</div>
+  ${activeAdmin() ? `<div class="detail-actions"><button class="button-quiet" data-edit-entry="${escapeHtml(item.id)}">Редактировать</button><button class="button-quiet" data-history="${escapeHtml(item.id)}">История изменений</button><button class="button-danger" data-delete-entry="${escapeHtml(item.id)}">Удалить</button></div><div id="history-panel"></div>` : ''}</article>`;
+}
+function admin() {
+  if (!activeAdmin()) return home();
+  return `<div class="page-heading"><div><span class="eyebrow">НАСТРОЙКИ ВИКИ</span><h1>Управление</h1><p>Создавайте вложенные разделы и назначайте роли участникам.</p></div><button class="button-quiet" data-reader-preview>Посмотреть как читатель</button></div>
+  <div class="tab-bar"><button class="${adminTab === 'sections' ? 'active' : ''}" data-admin-tab="sections">Разделы</button>${db.cloud ? `<button class="${adminTab === 'users' ? 'active' : ''}" data-admin-tab="users">Участники</button>` : ''}</div>
+  ${adminTab === 'users' && db.cloud ? `<div class="admin-panel"><h2>Участники</h2><p class="muted">Приглашения отправляются через Supabase. Здесь можно назначить роль после первого входа участника.</p><div class="user-list">${db.profiles.map(p => `<div class="user-row"><div><strong>${escapeHtml(p.email || p.id)}</strong><small>${p.id === db.user?.id ? 'Ваш аккаунт' : ''}</small></div><select data-role="${escapeHtml(p.id)}" aria-label="Роль ${escapeHtml(p.email || p.id)}"><option value="reader" ${p.role === 'reader' ? 'selected' : ''}>Читатель</option><option value="admin" ${p.role === 'admin' ? 'selected' : ''}>Администратор</option></select></div>`).join('')}</div></div>` :
+  `<div class="admin-categories">${['knowledge','cases','access'].map(kind => `<div class="admin-panel"><div class="admin-panel-head"><h2>${rootNames[kind]}</h2><button class="text-link" data-new-section="${kind}" data-parent="">＋ Раздел</button></div>${tree(kind, null, true)}</div>`).join('')}</div>`}`;
+}
+function auth() { return `<div class="auth-layout"><div><span class="eyebrow">КОМАНДНАЯ ВИКИ</span><h1>Вход в WikiHMRU</h1><p>Знания вашей команды — в одном защищённом рабочем пространстве.</p></div><form id="login-form" class="auth-card"><label class="field"><span>Рабочий email</span><input name="email" type="email" autocomplete="email" required></label><label class="field"><span>Пароль</span><input name="password" type="password" autocomplete="current-password" required></label><button class="button-primary" type="submit">Войти</button><p>Для доступа обратитесь к администратору вики.</p></form></div>`; }
+function invite() { return `<div class="auth-layout"><div><span class="eyebrow">ПРИГЛАШЕНИЕ</span><h1>Создайте пароль</h1><p>После сохранения откроется командная база знаний.</p></div><form id="invite-form" class="auth-card"><label class="field"><span>Новый пароль</span><input name="password" type="password" autocomplete="new-password" minlength="8" required></label><button class="button-primary" type="submit">Сохранить пароль</button></form></div>`; }
+async function hydrateImages(root = document) {
+  for (const img of root.querySelectorAll('img[data-image-path]')) {
+    const path = img.dataset.imagePath;
+    try { const url = await db.imageUrl(path); if (img.isConnected) img.src = url; }
+    catch { if (img.isConnected) img.alt = 'Не удалось загрузить фото'; }
+  }
+}
+function render() {
+  if (db.cloud && db.needsPassword) $('#content').innerHTML = invite();
+  else if (db.cloud && !db.session) $('#content').innerHTML = auth();
+  else $('#content').innerHTML = selectedId ? detail() : view === 'home' ? home() : view === 'admin' ? admin() : view === 'search' ? searchResults() : listing(view);
+  const showApp = !db.cloud || (db.session && !db.needsPassword);
+  $('#admin-nav').hidden = !activeAdmin() || !showApp;
+  $('#new-button').hidden = !activeAdmin() || !showApp;
+  document.querySelectorAll('.side-nav [data-view]').forEach(btn => btn.classList.toggle('active', btn.dataset.view === view));
+  $('#breadcrumb-current').textContent = rootNames[view] || 'Обзор';
+  $('#today').textContent = new Intl.DateTimeFormat('ru-RU', { day: 'numeric', month: 'long', year: 'numeric' }).format(new Date());
+  for (const kind of ['knowledge','cases','access']) $(`#nav-${kind}-count`).textContent = entriesFor(kind).length;
+  $('#export-button').hidden = db.cloud; $('#import-button').hidden = db.cloud;
+  $('#logout-button')?.remove();
+  if (db.cloud && db.session && !db.needsPassword) { const btn = document.createElement('button'); btn.id = 'logout-button'; btn.className = 'sidebar-action'; btn.textContent = '↪  Выйти из аккаунта'; $('.sidebar-bottom').prepend(btn); }
+  hydrateImages($('#content'));
+}
+function go(next, sec = null) { if (db.cloud && (!db.session || db.needsPassword)) return; view = next; sectionId = sec; selectedId = null; query = ''; versions = null; render(); }
+function sectionOptions(kind, selected = '', exclude = null) {
+  const list = db.sections.filter(s => s.kind === kind && s.id !== exclude && (!exclude || !descendants(exclude).has(s.id)));
+  return `<option value="">Без раздела</option>${list.map(s => `<option value="${escapeHtml(s.id)}" ${selected === s.id ? 'selected' : ''}>${escapeHtml('— '.repeat(Math.max(0, ancestors(s).length - 1)) + s.title)}</option>`).join('')}`;
+}
+function field(name, label, value = '', options = {}) {
+  return `<label class="field"><span>${label}${options.required ? ' *' : ''}</span>${options.textarea ? `<textarea name="${name}" rows="${options.rows || 3}" ${options.required ? 'required' : ''}>${escapeHtml(value)}</textarea>` : `<input name="${name}" value="${escapeHtml(value)}" ${options.required ? 'required' : ''} placeholder="${escapeHtml(options.placeholder || '')}">`}</label>`;
+}
+function renderBlocks() {
+  $('#blocks-list').innerHTML = draftBlocks.map((block, i) => {
+    const tools = `<div class="block-head"><strong>${blockNames[block.type]}</strong><div><button type="button" data-move-block="${i}" data-direction="-1" title="Вверх">↑</button><button type="button" data-move-block="${i}" data-direction="1" title="Вниз">↓</button><button type="button" data-remove-block="${i}" title="Удалить">×</button></div></div>`;
+    let fields;
+    if (block.type === 'image') {
+      fields = `<input type="file" data-image-file="${i}" accept="image/png,image/jpeg,image/webp,image/gif"><input data-block-field="caption" data-index="${i}" value="${escapeHtml(block.caption || '')}" placeholder="Подпись к фото"><div class="image-preview">${block.preview ? `<img src="${escapeHtml(block.preview)}" alt="Предпросмотр">` : block.path ? `<img data-image-path="${escapeHtml(block.path)}" alt="Предпросмотр">` : '<span>Выберите фото · JPG, PNG, WebP, GIF до 10 МБ</span>'}</div>`;
+    } else if (block.type === 'link') {
+      fields = `<input data-block-field="text" data-index="${i}" value="${escapeHtml(block.text || '')}" placeholder="Текст ссылки"><input data-block-field="href" data-index="${i}" value="${escapeHtml(block.href || '')}" placeholder="https://example.com">`;
+    } else {
+      fields = `<textarea data-block-field="text" data-index="${i}" rows="${block.type === 'code' ? 6 : 3}" placeholder="${block.type === 'list' ? 'Один пункт на строку' : 'Введите текст...'}">${escapeHtml(block.text || '')}</textarea>`;
+    }
+    return `<div class="block-editor" data-block="${i}">${tools}${fields}</div>`;
+  }).join('') || '<p class="muted">Добавьте блоки, чтобы оформить материал.</p>';
+  hydrateImages($('#blocks-list'));
+}
+function openEditor(kind, id = null) {
+  if (!activeAdmin()) return;
+  const item = db.entries.find(e => e.id === id) || {};
+  const privateParent = item.section_id && ancestors(db.sections.find(s => s.id === item.section_id)).some(s => s.visibility === 'admins');
+  editingId = id; editorKind = kind; pendingFiles = new Map();
+  draftBlocks = (item.blocks || []).map(b => ({ ...b, client_id: uuid() }));
+  $('#dialog-title').textContent = id ? 'Редактировать запись' : 'Новая запись';
+  $('#editor-fields').innerHTML = `<div class="editor-top-grid">${field('title','Название',item.title,{required:true,placeholder:'Короткое понятное название'})}${field('summary','Краткое описание',item.summary,{placeholder:'О чём материал'})}<label class="field"><span>Раздел</span><select name="section_id">${sectionOptions(kind,item.section_id)}</select></label><label class="field"><span>Доступ</span><select name="visibility"><option value="all" ${item.visibility !== 'admins' && !privateParent ? 'selected' : ''}>Все читатели</option><option value="admins" ${item.visibility === 'admins' || privateParent ? 'selected' : ''}>Только администраторы</option></select></label></div>
+  ${kind === 'access' ? `<div class="editor-top-grid">${field('tool','Программа',item.tool,{placeholder:'AnyDesk или RuDesktop'})}${field('device','Устройство / пользователь',item.device)}${field('remote_id','ID подключения',item.remote_id)}</div><div class="security-note compact">ID доступен читателям, если запись открыта для всех. Не добавляйте пароли, ключи и одноразовые коды.</div>` : ''}
+  <div class="block-area"><div class="block-area-head"><div><strong>Содержание</strong><p>Соберите карточку из блоков в нужном порядке.</p></div></div><div id="blocks-list"></div><div class="block-toolbar">${Object.entries(blockNames).map(([type,label]) => `<button type="button" data-add-block="${type}">＋ ${label}</button>`).join('')}</div></div>`;
+  renderBlocks(); $('#editor-dialog').showModal(); $('#editor-form [name=title]').focus();
+}
+function openSection(kind, id = null, parent = null) {
+  if (!activeAdmin()) return;
+  const item = db.sections.find(s => s.id === id) || {};
+  const privateParent = (item.parent_id || parent) && ancestors(db.sections.find(s => s.id === (item.parent_id || parent))).some(s => s.visibility === 'admins');
+  $('#section-dialog-title').textContent = id ? 'Редактировать раздел' : 'Новый раздел';
+  $('#section-form').dataset.id = id || ''; $('#section-form').dataset.kind = kind;
+  $('#section-fields').innerHTML = `${field('title','Название раздела',item.title,{required:true,placeholder:'Например, IP-телефония'})}<label class="field"><span>Родительский раздел</span><select name="parent_id">${sectionOptions(kind,item.parent_id || parent,id)}</select></label><label class="field"><span>Доступ</span><select name="visibility"><option value="all" ${item.visibility !== 'admins' && !privateParent ? 'selected' : ''}>Все читатели</option><option value="admins" ${item.visibility === 'admins' || privateParent ? 'selected' : ''}>Только администраторы</option></select></label>${id ? '<button type="button" class="button-danger" data-delete-section="'+escapeHtml(id)+'">Удалить раздел</button>' : ''}`;
+  $('#section-dialog').showModal(); $('#section-form [name=title]').focus();
+}
+async function showHistory(id) {
+  try { versions = await db.versions(id); const panel = $('#history-panel'); if (!panel) return;
+    panel.innerHTML = `<div class="history-panel"><h2>История изменений</h2>${versions.length ? versions.map(v => `<div class="version-row"><div><strong>${escapeHtml(v.snapshot?.title || 'Без названия')}</strong><span>${dateTime(v.changed_at)} · ${escapeHtml(db.profiles.find(p => p.id === v.changed_by)?.email || (v.changed_by === 'local' ? 'Локальный редактор' : 'Администратор'))}</span></div><button class="button-quiet" data-restore="${escapeHtml(v.id)}">Восстановить</button></div>`).join('') : '<p class="muted">Предыдущих версий пока нет.</p>'}</div>`;
+  } catch (error) { toast(error.message); }
+}
+function updateListSearch() {
+  const target = $('#list-results'); if (!target) return;
+  const set = sectionId ? descendants(sectionId) : null;
+  const all = entriesFor(view).filter(e => !set || set.has(e.section_id));
+  const found = all.filter(e => [e.title,e.summary,e.device,e.tool,e.remote_id,...(e.blocks || []).map(b => b.text || b.caption)].join(' ').toLowerCase().includes(query.toLowerCase()));
+  target.innerHTML = found.length ? found.map(card).join('') : empty('Ничего не найдено.', view);
+}
+function updateGlobalSearch() {
+  const target = $('#search-results'); if (!target) return;
+  const found = db.entries.filter(visibleEntry).filter(e => [e.title,e.summary,e.device,e.tool,e.remote_id,sectionTrail(e.section_id),...(e.blocks || []).map(b => b.text || b.caption)].join(' ').toLowerCase().includes(query.toLowerCase()));
+  target.innerHTML = found.length ? found.map(card).join('') : empty('По вашему запросу записей нет.', 'knowledge');
+}
+document.addEventListener('click', async event => {
+  const button = event.target.closest('button'); if (!button) return;
+  if (button.id === 'theme-toggle') return theme(document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark');
+  if (button.dataset.view) return go(button.dataset.view);
+  if (button.dataset.section) { const kind = button.dataset.kind; view = kind; sectionId = button.dataset.section === 'all' ? null : button.dataset.section; selectedId = null; query = ''; render(); return; }
+  if (button.dataset.open) { selectedId = button.dataset.open; versions = null; render(); return; }
+  if (button.dataset.back !== undefined) { selectedId = null; render(); return; }
+  if (button.dataset.create) return openEditor(button.dataset.create);
+  if (button.id === 'new-button') return openEditor(['knowledge','cases','access'].includes(view) ? view : 'knowledge');
+  if (button.dataset.editEntry) return openEditor(db.entries.find(e => e.id === button.dataset.editEntry)?.type, button.dataset.editEntry);
+  if (button.dataset.deleteEntry) { if (!confirm('Удалить запись? Она исчезнет у всех участников.')) return; try { await db.deleteEntry(button.dataset.deleteEntry); selectedId = null; render(); toast('Запись удалена'); } catch (e) { toast(e.message); } return; }
+  if (button.dataset.history) return showHistory(button.dataset.history);
+  if (button.dataset.restore) { const v = versions?.find(x => String(x.id) === button.dataset.restore); if (!v || !confirm('Восстановить эту версию? Текущая сохранится в истории.')) return; try { await db.saveEntry({ ...v.snapshot, id: selectedId }); render(); toast('Версия восстановлена'); } catch (e) { toast(e.message); } return; }
+  if (button.dataset.newSection) return openSection(button.dataset.newSection, null, button.dataset.parent || null);
+  if (button.dataset.editSection) { const s = db.sections.find(x => x.id === button.dataset.editSection); return openSection(s.kind, s.id); }
+  if (button.dataset.deleteSection) { if (!confirm('Удалить раздел?')) return; try { await db.deleteSection(button.dataset.deleteSection); $('#section-dialog').close(); render(); toast('Раздел удалён'); } catch (e) { toast(e.message); } return; }
+  if (button.dataset.adminTab) { adminTab = button.dataset.adminTab; render(); return; }
+  if (button.dataset.readerPreview !== undefined) { readerPreview = true; go('home'); return; }
+  if (button.dataset.exitPreview !== undefined) { readerPreview = false; go('admin'); return; }
+  if (button.dataset.search !== undefined) { const value = $('#home-search').value.trim(); go('search'); query = value; render(); return; }
+  if (button.dataset.copyCode !== undefined) { const b = db.entries.find(e => e.id === selectedId)?.blocks?.[Number(button.dataset.copyCode)]; if (b) { await navigator.clipboard.writeText(b.text || ''); toast('Код скопирован'); } return; }
+  if (button.dataset.addBlock) { draftBlocks.push({ type: button.dataset.addBlock, client_id: uuid(), text: '', caption: '', path: '', href: '' }); renderBlocks(); return; }
+  if (button.dataset.removeBlock !== undefined) { const index = Number(button.dataset.removeBlock); const removed = draftBlocks.splice(index,1)[0]; if (removed?.preview) URL.revokeObjectURL(removed.preview); pendingFiles.delete(removed?.client_id); renderBlocks(); return; }
+  if (button.dataset.moveBlock !== undefined) { const i = Number(button.dataset.moveBlock), j = i + Number(button.dataset.direction); if (j < 0 || j >= draftBlocks.length) return; [draftBlocks[i],draftBlocks[j]] = [draftBlocks[j],draftBlocks[i]]; renderBlocks(); return; }
+  if (button.id === 'close-dialog' || button.id === 'cancel-dialog') { $('#editor-dialog').close(); return; }
+  if (button.dataset.closeSection !== undefined) { $('#section-dialog').close(); return; }
+  if (button.id === 'logout-button') { await db.logout(); readerPreview = false; go('home'); render(); return; }
+});
+$('#content').addEventListener('input', event => {
+  if (event.target.id === 'list-search') { query = event.target.value; updateListSearch(); }
+  if (event.target.id === 'global-search') { query = event.target.value; updateGlobalSearch(); }
+});
+$('#content').addEventListener('keydown', event => { if (event.target.id === 'home-search' && event.key === 'Enter') { event.preventDefault(); query = event.target.value.trim(); view = 'search'; selectedId = null; render(); } });
+$('#content').addEventListener('change', async event => {
+  if (!event.target.dataset.role) return;
+  const id = event.target.dataset.role, role = event.target.value;
+  if (!confirm(`Назначить роль «${role === 'admin' ? 'Администратор' : 'Читатель'}»?`)) { render(); return; }
+  try { await db.updateRole(id, role); render(); toast('Роль обновлена'); } catch (e) { render(); toast(e.message); }
+});
+$('#editor-fields').addEventListener('input', event => {
+  const index = Number(event.target.dataset.index), key = event.target.dataset.blockField;
+  if (key && draftBlocks[index]) draftBlocks[index][key] = event.target.value;
+});
+$('#editor-fields').addEventListener('change', event => {
+  if (event.target.name === 'section_id') {
+    const section = db.sections.find(s => s.id === event.target.value);
+    if (section && ancestors(section).some(s => s.visibility === 'admins')) $('#editor-form [name=visibility]').value = 'admins';
+    return;
+  }
+  const index = Number(event.target.dataset.imageFile); if (!event.target.hasAttribute('data-image-file') || !draftBlocks[index]) return;
+  const file = event.target.files[0]; if (!file) return;
+  if (!['image/jpeg','image/png','image/webp','image/gif'].includes(file.type) || file.size > 10*1024*1024) { toast('Поддерживаются JPG, PNG, WebP и GIF до 10 МБ'); return; }
+  const block = draftBlocks[index]; if (block.preview) URL.revokeObjectURL(block.preview);
+  block.preview = URL.createObjectURL(file); pendingFiles.set(block.client_id,file); renderBlocks();
+});
+$('#section-fields').addEventListener('change', event => {
+  if (event.target.name !== 'parent_id') return;
+  const section = db.sections.find(s => s.id === event.target.value);
+  if (section && ancestors(section).some(s => s.visibility === 'admins')) $('#section-form [name=visibility]').value = 'admins';
+});
+$('#editor-form').addEventListener('submit', async event => {
+  event.preventDefault(); const form = event.target; if (!form.reportValidity()) return;
+  const data = Object.fromEntries(new FormData(form).entries()); const old = db.entries.find(e => e.id === editingId);
+  const id = editingId || uuid();
+  const privateSection = db.sections.find(s => s.id === data.section_id);
+  const forcedPrivate = privateSection && ancestors(privateSection).some(s => s.visibility === 'admins');
+  const base = { id, type: editorKind, section_id: data.section_id || null, title: data.title.trim(), summary: (data.summary || '').trim(), visibility: forcedPrivate ? 'admins' : data.visibility, tool: (data.tool || '').trim(), device: (data.device || '').trim(), remote_id: (data.remote_id || '').trim(), author_id: old?.author_id || db.user?.id || null };
+  if (!base.title) return;
+  const button = form.querySelector('[type=submit]'); button.disabled = true;
+  try {
+    const blocks = draftBlocks.map(({ type,text,caption,path,href }) => ({ type, text: text || '', caption: caption || '', path: path || '', href: href || '' }));
+    if (blocks.some(b => b.type === 'link' && !safeUrl(b.href))) throw Error('Укажите полный адрес ссылки с https:// или http://');
+    const uploads = draftBlocks.map((b,i) => ({ file: pendingFiles.get(b.client_id), i })).filter(x => x.file);
+    if (db.cloud && !editingId && uploads.length) await db.saveEntry({ ...base, blocks: blocks.filter((_,i) => !uploads.some(u => u.i === i)) });
+    for (const { file, i } of uploads) blocks[i].path = await db.uploadImage(id, file);
+    await db.saveEntry({ ...base, blocks });
+    for (const block of draftBlocks) if (block.preview) URL.revokeObjectURL(block.preview);
+    $('#editor-dialog').close(); selectedId = id; view = editorKind; render(); toast('Запись сохранена');
+  } catch (e) { toast('Не удалось сохранить: ' + e.message); }
+  finally { button.disabled = false; }
+});
+$('#section-form').addEventListener('submit', async event => {
+  event.preventDefault(); const form = event.target; if (!form.reportValidity()) return;
+  const data = Object.fromEntries(new FormData(form).entries());
+  const parentSection = db.sections.find(x => x.id === data.parent_id);
+  const parentPrivate = parentSection && ancestors(parentSection).some(x => x.visibility === 'admins');
+  const s = { id: form.dataset.id || uuid(), kind: form.dataset.kind, title: data.title.trim(), parent_id: data.parent_id || null, visibility: parentPrivate ? 'admins' : data.visibility, sort_order: db.sections.find(x => x.id === form.dataset.id)?.sort_order || db.sections.filter(x => x.kind === form.dataset.kind).length + 1 };
+  if (!s.title) return;
+  try { await db.saveSection(s); $('#section-dialog').close(); render(); toast('Раздел сохранён'); } catch (e) { toast(e.message); }
+});
+$('#content').addEventListener('submit', async event => {
+  if (event.target.id === 'login-form') {
+    event.preventDefault(); const form = event.target; if (!form.reportValidity()) return;
+    const data = Object.fromEntries(new FormData(form).entries()); const btn = form.querySelector('button'); btn.disabled = true;
+    try { await db.login(data.email, data.password); render(); } catch (e) { toast('Ошибка входа: ' + e.message); } finally { btn.disabled = false; }
+  }
+  if (event.target.id === 'invite-form') {
+    event.preventDefault(); const form = event.target; if (!form.reportValidity()) return; const btn = form.querySelector('button'); btn.disabled = true;
+    try { await db.setInvitePassword(new FormData(form).get('password')); render(); toast('Пароль сохранён'); } catch (e) { toast(e.message); } finally { btn.disabled = false; }
+  }
+});
+$('#export-button').addEventListener('click', () => {
+  const blob = new Blob([JSON.stringify(db.exportLocal(),null,2)],{type:'application/json'}), url = URL.createObjectURL(blob), a = document.createElement('a');
+  a.href = url; a.download = `WikiHMRU-${new Date().toISOString().slice(0,10)}.json`; a.click(); setTimeout(() => URL.revokeObjectURL(url),1000);
+});
+$('#import-button').addEventListener('click', () => $('#import-file').click());
+$('#import-file').addEventListener('change', async event => { const file = event.target.files[0]; if (!file) return; try { const data = JSON.parse(await file.text()); if (!confirm('Заменить текущие локальные данные содержимым файла?')) return; db.importLocal(data); go('home'); toast('Копия загружена'); } catch (e) { toast(e.message); } finally { event.target.value = ''; } });
+(async () => { try { await db.init(); render(); } catch (e) { render(); toast('Ошибка загрузки: ' + e.message); } })();
+})();
