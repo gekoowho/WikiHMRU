@@ -23,6 +23,7 @@ const base = process.env.WIKI_TEST_URL || 'http://127.0.0.1:8765';
     await page.locator('#editor-form [name=glpi_ticket_ids]').fill('8487, #8490');
     await page.locator('#editor-form [name=relevance]').selectOption('review');
     await page.locator('#editor-form [name=pinned]').check();
+    await page.locator('.related-picker summary').click();
     await page.locator('#related-options [name=related_ids]').first().check();
     await page.locator('#save-draft-button').click();
     await page.getByRole('heading', { name: 'Черновик инструкции GLPI', exact: true }).waitFor();
