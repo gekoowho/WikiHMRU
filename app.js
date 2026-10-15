@@ -108,7 +108,7 @@ function sectionTrail(id) { const s = db.sections.find(x => x.id === id); return
 function card(entry) {
   const sec = sectionTrail(entry.section_id), excerpt = entry.type === 'access' ? [canonicalProgram(entry.tool) || entry.tool, entry.remote_id].filter(Boolean).join(' · ') : entry.summary || entry.blocks?.find(b => b.type === 'text')?.text || 'Откройте запись';
   const pictogram = entry.type === 'access' ? programIcon(entry.tool) : icon(/принт|печать|мфу/i.test(entry.title + sec) ? 'printer' : entry.type);
-  const markup = `<button class="entry-card ${selectedId === entry.id ? 'selected' : ''}" data-open="${escapeHtml(entry.id)}"><span class="card-icon">${pictogram}</span><div class="card-content"><h3>${escapeHtml(entry.title)}</h3><p>${escapeHtml(excerpt)}</p><div class="card-top">${entry.visibility === 'admins' ? '<span class="private-chip">Только админам</span>' : ''}${entryBadges(entry)}</div>${entryTags(entry)}<div class="card-foot"><span>${icon('folder')}${escapeHtml(sec)}</span><span>${date(entry.updated_at)}</span></div></div></button>`;
+  const markup = `<article class="entry-card ${selectedId === entry.id ? 'selected' : ''}" data-open="${escapeHtml(entry.id)}"><span class="card-icon">${pictogram}</span><div class="card-content"><h3><button class="card-title-button" data-open="${escapeHtml(entry.id)}">${escapeHtml(entry.title)}</button></h3><p>${escapeHtml(excerpt)}</p><div class="card-top">${entry.visibility === 'admins' ? '<span class="private-chip">Только админам</span>' : ''}${entryBadges(entry)}</div>${entryTags(entry,true)}<div class="card-foot"><span>${icon('folder')}${escapeHtml(sec)}</span><span>${date(entry.updated_at)}</span></div></div></article>`;
   if (entry.type !== 'access') return markup;
   const link = remoteLink(entry);
   return `<div class="remote-card ${selectedId === entry.id ? 'selected' : ''}">${markup}<div class="remote-card-actions">${link ? `<a class="button-primary" href="${escapeHtml(link.href)}" data-launch-remote>Подключиться</a>` : ''}<button class="button-quiet" data-copy-remote="${escapeHtml(entry.id)}">Копировать ID</button></div></div>`;
@@ -391,7 +391,7 @@ function updateGlobalSearch() {
 }
 document.addEventListener('click', async event => {
   if (event.target.closest('[data-launch-remote]')) { toast('Разрешите браузеру открыть приложение. Если оно не открылось, используйте настройку в записи.'); return; }
-  const button = event.target.closest('button'); if (!button) return;
+  const button = event.target.closest('button') || (!event.target.closest('a,input,select,textarea') && event.target.closest('.entry-card[data-open]')); if (!button) return;
   if (button.dataset.downloadLauncher) {
     const program = button.dataset.downloadLauncher;
     if (!['AnyDesk','RuDesktop','Terminal'].includes(program)) return;

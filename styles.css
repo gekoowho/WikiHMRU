@@ -567,3 +567,8 @@ a.button-primary { display:inline-flex; align-items:center; justify-content:cent
 .diff-values small { color:var(--muted); }
 .diff-values pre { white-space:pre-wrap; overflow-wrap:anywhere; font:inherit; font-size:12px; margin:6px 0 0; max-height:280px; overflow:auto; }
 @media(max-width:650px) { .diff-values { grid-template-columns:minmax(0,1fr); } }
+
+.entry-card { cursor:pointer; text-align:left; }
+.card-title-button { padding:0; border:0; background:transparent; color:inherit; font:inherit; text-align:left; }
+.card-title-button:hover { text-decoration:underline; }
+.entry-card .ticket-chip { cursor:pointer; }
