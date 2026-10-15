@@ -92,6 +92,33 @@ const base = process.env.WIKI_TEST_URL || 'http://127.0.0.1:8765/WikiHMRU/';
     assert.equal(await page.locator('#editor-form [name=summary]').count(), 0);
     assert.equal(await page.locator('#editor-form #blocks-list').count(), 0);
     await page.locator('#cancel-dialog').click();
+    for (const [program, id, href] of [['AnyDesk','123 456 789','anydesk:123456789'],['RuDesktop','987 654 321','wikihmru-rudesktop:987654321'],['Терминал','admin@192.168.1.20:22','wikihmru-terminal:admin%40192.168.1.20%3A22']]) {
+      await page.locator('#new-button').click();
+      await page.locator('[data-choose-topic=access]').click();
+      await page.locator('#editor-form [name=title]').fill('Подключение ' + program);
+      await page.locator('#editor-form [name=tool]').selectOption(program);
+      await page.locator('#editor-form [name=remote_id]').fill(id);
+      await page.locator('#save-entry-button').click();
+      await page.locator('#editor-dialog').waitFor({state:'hidden'});
+      assert.equal(await page.locator('.workspace-detail [data-launch-remote]').getAttribute('href'),href);
+      assert.equal(await page.locator('.remote-card').filter({hasText:'Подключение ' + program}).locator('[data-launch-remote]').getAttribute('href'),href);
+    }
+    await page.locator('.remote-setup summary').click();
+    const downloadEvent = page.waitForEvent('download');
+    await page.locator('[data-download-launcher]').click();
+    const download = await downloadEvent;
+    assert.equal(download.suggestedFilename(),'WikiHMRU-Terminal.ps1');
+    const setup = fs.readFileSync(await download.path(),'utf8');
+    assert(setup.includes("[string]$Program = 'Terminal',"));
+    assert(setup.includes("$arguments = @('--connect', $target.TrimEnd('/'))"));
+    await page.locator('.side-nav [data-view=knowledge]').click();
+    for (const selector of ['.top-search','.search-wrap']) {
+      const delta = await page.locator(selector).first().evaluate(el => {
+        const svg = el.querySelector('.search-icon svg').getBoundingClientRect(), input = el.querySelector('input').getBoundingClientRect();
+        return Math.abs(svg.y+svg.height/2-input.y-input.height/2);
+      });
+      assert(delta <= 1,'Search icon is not vertically centered: ' + delta);
+    }
     await page.setViewportSize({ width: 390, height: 844 });
     await page.locator('.side-nav [data-view=knowledge]').click();
     assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), 'Mobile layout overflows');

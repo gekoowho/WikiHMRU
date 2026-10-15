@@ -518,3 +518,19 @@ mark { border-radius:2px; padding:0 1px; color:inherit; background:#d8e7f7; }
 :root[data-theme="dark"] #login-error { color:#f4b6b6; }
 body { font-family:"Segoe UI",system-ui,sans-serif; }
 @media(max-width:960px) { .workspace-layout.has-selection .workspace-list { display:none; } .workspace-layout:not(.has-selection) .workspace-detail { display:none; } }
+
+/* Search icons use a fixed SVG box, independent of font metrics. */
+.search-wrap { display:block; min-width:0; }
+.search-wrap > .search-icon { position:absolute; left:13px; top:50%; transform:translateY(-50%); display:grid; place-items:center; width:18px; height:18px; pointer-events:none; }
+.search-icon .ui-icon { display:block; width:18px; height:18px; }
+.hero-search > .search-icon { display:grid; place-items:center; width:18px; height:18px; flex:none; margin:0 10px; }
+.top-search .search-icon { display:grid; place-items:center; width:16px; height:16px; flex:none; color:var(--muted); }
+.top-search .search-icon .ui-icon { width:16px; height:16px; }
+.remote-card { min-width:0; border:1px solid var(--border); border-radius:8px; background:var(--surface); overflow:hidden; }
+.remote-card .entry-card { width:100%; border:0; border-radius:0; }
+.remote-card-actions { display:flex; align-items:center; gap:8px; padding:0 12px 12px; flex-wrap:wrap; }
+a.button-primary { display:inline-flex; align-items:center; justify-content:center; text-decoration:none; }
+.remote-setup { margin-top:20px; font-size:13px; }
+.remote-setup summary { cursor:pointer; color:var(--primary); }
+.remote-setup li { margin:7px 0; }
+.setup-command { white-space:pre-wrap; overflow-wrap:anywhere; padding:12px; border:1px solid var(--border); border-radius:6px; background:var(--surface-soft); font-size:12px; }

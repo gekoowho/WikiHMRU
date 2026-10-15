@@ -57,6 +57,8 @@ jobs:
         run: |
           mkdir -p _site
           cp index.html styles.css store.js features.js app.js config.js favicon.svg _site/
+          mkdir -p _site/scripts
+          cp scripts/install-remote-links.ps1 _site/scripts/
           cp index.html _site/404.html
           for route in base hard access drafts trash admin search; do
             mkdir -p "_site/$route"
