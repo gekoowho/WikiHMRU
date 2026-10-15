@@ -28,7 +28,9 @@ jobs:
           node "$RUNNER_TEMP/wiki-test-tools/node_modules/playwright/cli.js" install --with-deps chromium
       - name: Verify site in browser
         run: |
-          python3 -m http.server 8765 --bind 127.0.0.1 >/tmp/wiki-test-server.log 2>&1 &
+          mkdir -p "$RUNNER_TEMP/wiki-test-server"
+          ln -s "$GITHUB_WORKSPACE" "$RUNNER_TEMP/wiki-test-server/WikiHMRU"
+          python3 -m http.server 8765 --directory "$RUNNER_TEMP/wiki-test-server" --bind 127.0.0.1 >/tmp/wiki-test-server.log 2>&1 &
           wiki_server_pid=$!
           trap 'kill "$wiki_server_pid"' EXIT
           for attempt in 1 2 3 4 5; do
@@ -55,6 +57,11 @@ jobs:
         run: |
           mkdir -p _site
           cp index.html styles.css store.js features.js app.js config.js favicon.svg _site/
+          cp index.html _site/404.html
+          for route in base hard access drafts trash admin search; do
+            mkdir -p "_site/$route"
+            cp index.html "_site/$route/index.html"
+          done
       - uses: actions/upload-pages-artifact@v3
         with:
           name: github-pages-${{ github.run_attempt }}

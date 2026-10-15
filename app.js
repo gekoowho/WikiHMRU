@@ -14,11 +14,14 @@ let view = 'home', sectionId = null, selectedId = null, query = '', editingId = 
 let tagFilter = '', statusFilter = '', pinnedOnly = false, commentsRequest = 0, commentRows = [];
 let draftBlocks = [], pendingFiles = new Map(), versions = null, adminTab = 'sections', readerPreview = false, toastTimer;
 const activeAdmin = () => db.isAdmin() && !readerPreview;
+const routePaths = {home:'',knowledge:'base',cases:'hard',access:'access',drafts:'drafts',trash:'trash',admin:'admin',search:'search'};
+const basePath = new URL(document.baseURI).pathname.replace(/\/$/,'');
 function readRoute() {
   const params = new URLSearchParams(location.search);
-  view = Object.hasOwn(rootNames, params.get('view')) ? params.get('view') : 'home';
-  sectionId = params.get('section') || null;
-  selectedId = params.get('entry') || null;
+  const path = location.pathname.slice(basePath.length).split('/').filter(Boolean);
+  view = (path.length ? Object.entries(routePaths).find(([,slug]) => slug === path[0])?.[0] : null) || (Object.hasOwn(rootNames, params.get('view')) ? params.get('view') : 'home');
+  sectionId = (path[1] === 'category' ? path[2] : null) || params.get('section') || null;
+  selectedId = (path[1] === 'record' ? path[2] : null) || params.get('entry') || null;
   query = params.get('q') || '';
   tagFilter = params.get('tag') || ''; statusFilter = Object.hasOwn(features.relevance, params.get('status')) ? params.get('status') : ''; pinnedOnly = params.get('pinned') === '1';
   versions = null;
@@ -26,9 +29,8 @@ function readRoute() {
 function syncRoute(replace = false) {
   const url = new URL(location.href);
   for (const key of ['view', 'section', 'entry', 'q', 'tag', 'status', 'pinned']) url.searchParams.delete(key);
-  if (view !== 'home') url.searchParams.set('view', view);
-  if (sectionId) url.searchParams.set('section', sectionId);
-  if (selectedId) url.searchParams.set('entry', selectedId);
+  url.pathname = basePath + '/' + routePaths[view] + (selectedId ? '/record/' + encodeURIComponent(selectedId) : sectionId ? '/category/' + encodeURIComponent(sectionId) : '') + (view === 'home' ? '' : '/');
+  if (selectedId && sectionId) url.searchParams.set('section', sectionId);
   if (query) url.searchParams.set('q', query);
   if (tagFilter) url.searchParams.set('tag', tagFilter);
   if (statusFilter) url.searchParams.set('status', statusFilter);
@@ -57,6 +59,16 @@ function remoteLink(item) {
   if (['rudesktop', 'рудесктоп'].includes(tool) && /^\d{1,20}$/.test(id)) return { href: 'wikihmru-rudesktop:' + id, label: 'Подключиться через RuDesktop', setup: true };
   if (['putty', 'mobaxterm', 'terminal', 'терминал'].includes(tool) && sshTarget(id)) return { href: 'wikihmru-terminal:' + encodeURIComponent(id), label: 'Открыть терминал', setup: true };
   return null;
+}
+function icon(name) {
+  const paths = { knowledge:'<path d="M4 3h12l4 4v14H4zM16 3v5h4M8 12h8M8 16h6"/>', cases:'<path d="M12 3 2 21h20zM12 9v5M12 17h.01"/>', access:'<rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/>', home:'<path d="m3 10 9-7 9 7M5 9v12h5v-7h4v7h5V9"/>', drafts:'<path d="M4 3h12l4 4v14H4zM8 12h8M8 16h6"/>', trash:'<path d="M3 6h18M9 6V3h6v3M5 6l1 15h12l1-15M10 10v7M14 10v7"/>', admin:'<circle cx="12" cy="12" r="4"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M5 19l2-2M17 7l2-2"/>', printer:'<path d="M6 8V3h12v5M6 17H3V8h18v9h-3M6 14h12v7H6zM17 11h1"/>', folder:'<path d="M3 5h7l2 3h9v13H3z"/>' };
+  return `<svg class="ui-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths[name] || paths.knowledge}</svg>`;
+}
+function programIcon(value) {
+  const p = canonicalProgram(value);
+  if (p === 'RuDesktop') return '<svg class="program-icon" viewBox="0 0 100 100" aria-hidden="true"><rect width="100" height="100" rx="26" fill="#d12d2f"/><circle cx="50" cy="50" r="26" fill="white"/><path d="M67 23 33 77" stroke="#d12d2f" stroke-width="9"/></svg>';
+  if (p === 'AnyDesk') return '<svg class="program-icon" viewBox="0 0 100 70" aria-hidden="true"><path d="m30 5 30 30-30 30L0 35zM55 5l30 30-30 30h15l30-30L70 5z" fill="#ef3b35"/></svg>';
+  return '<svg class="program-icon" viewBox="0 0 100 80" aria-hidden="true"><rect x="2" y="3" width="96" height="74" rx="5" fill="#262626"/><path d="M2 14h96" stroke="#9ca3af" stroke-width="8"/><path d="m17 31 13 10-13 10M37 53h18" stroke="white" stroke-width="5" fill="none"/></svg>';
 }
 function remoteActions(item) {
   const link = remoteLink(item);
@@ -94,8 +106,9 @@ function descendants(id) { const found = new Set([id]); let changed = true; whil
 function sectionName(id) { return db.sections.find(s => s.id === id)?.title || 'Без раздела'; }
 function sectionTrail(id) { const s = db.sections.find(x => x.id === id); return s ? ancestors(s).map(x => x.title).join(' / ') : 'Без раздела'; }
 function card(entry) {
-  const sec = sectionTrail(entry.section_id), excerpt = entry.type === 'access' ? [canonicalProgram(entry.tool) || entry.tool, entry.remote_id].filter(Boolean).join(' · ') : entry.summary || entry.blocks?.find(b => b.type === 'text')?.text || entry.device || 'Откройте запись';
-  return `<button class="entry-card" data-open="${escapeHtml(entry.id)}"><div class="card-top"><span class="badge ${escapeHtml(entry.type)}">${escapeHtml(rootNames[entry.type])}</span>${entry.visibility === 'admins' ? '<span class="private-chip">⌁ Только админам</span>' : ''}${entryBadges(entry)}</div><h3>${escapeHtml(entry.title)}</h3><p>${escapeHtml(excerpt)}</p>${entryTags(entry)}<div class="card-foot"><span>${escapeHtml(sec)}</span><span>${date(entry.updated_at)}</span></div></button>`;
+  const sec = sectionTrail(entry.section_id), excerpt = entry.type === 'access' ? [canonicalProgram(entry.tool) || entry.tool, entry.remote_id].filter(Boolean).join(' · ') : entry.summary || entry.blocks?.find(b => b.type === 'text')?.text || 'Откройте запись';
+  const pictogram = entry.type === 'access' ? programIcon(entry.tool) : icon(/принт|печать|мфу/i.test(entry.title + sec) ? 'printer' : entry.type);
+  return `<button class="entry-card ${selectedId === entry.id ? 'selected' : ''}" data-open="${escapeHtml(entry.id)}"><span class="card-icon">${pictogram}</span><div class="card-content"><h3>${escapeHtml(entry.title)}</h3><p>${escapeHtml(excerpt)}</p><div class="card-top">${entry.visibility === 'admins' ? '<span class="private-chip">Только админам</span>' : ''}${entryBadges(entry)}</div>${entryTags(entry)}<div class="card-foot"><span>${icon('folder')}${escapeHtml(sec)}</span><span>${date(entry.updated_at)}</span></div></div></button>`;
 }
 function empty(message, kind) { return `<div class="empty-state"><div class="empty-icon">◇</div><h3>Пока здесь пусто</h3><p>${escapeHtml(message)}</p>${activeAdmin() ? `<button data-create="${kind}">Добавить запись</button>` : ''}</div>`; }
 function tree(kind, selected = sectionId, admin = false) {
@@ -148,7 +161,8 @@ function searchEntries(entries, value = query) {
   if (!normalized) return entries.slice().sort((a,b) => Number(b.pinned)-Number(a.pinned));
   const latin = "qwertyuiop[]asdfghjkl;'zxcvbnm,.", russian = 'йцукенгшщзхъфывапролджэячсмитьбю';
   const switched = [...normalized].map(c => { const i=latin.indexOf(c), j=russian.indexOf(c); return i >= 0 ? russian[i] : j >= 0 ? latin[j] : c; }).join('');
-  const variants = [...new Set([normalized,switched])].map(v => v.match(/[\p{L}\p{N}]+/gu) || []);
+  const aliases = normalized.replace(/(?:энидеск|анидеск)/g,'anydesk').replace(/рудесктоп/g,'rudesktop').replace(/\bssh\b/g,'терминал');
+  const variants = [...new Set([normalized,switched,aliases])].map(v => v.match(/[\p{L}\p{N}]+/gu) || []);
   return entries.map((entry, index) => {
     const title = normalizeSearch(entry.title);
     const text = normalizeSearch([entry.title,entry.summary,entry.device,entry.tool,entry.remote_id,...(entry.tags || []),...(entry.glpi_ticket_ids || []),sectionTrail(entry.section_id),...(entry.blocks || []).map(b => b.text || b.caption)].join(' '));
@@ -165,10 +179,7 @@ function listing(kind) {
   const sectionSet = sectionId ? descendants(sectionId) : null;
   const all = entriesFor(kind).filter(e => !sectionSet || sectionSet.has(e.section_id));
   const found = searchEntries(filteredEntries(all));
-  return `<div class="page-heading"><div><span class="eyebrow">${escapeHtml(rootNames[kind]).toUpperCase()}</span><h1>${sectionId ? escapeHtml(sectionName(sectionId)) : escapeHtml(rootNames[kind])}</h1><p>${kind === 'knowledge' ? 'Проверенные инструкции для типовых задач.' : kind === 'cases' ? 'Разборы нестандартных ситуаций и решений.' : 'Подключения через AnyDesk, RuDesktop и терминал.'}</p></div></div>
-  <div class="catalog-layout">${tree(kind)}<div class="catalog-main"><div class="toolbar"><label class="search-wrap"><span>⌕</span><input id="list-search" type="search" placeholder="Поиск в разделе..." value="${escapeHtml(query)}" aria-label="Поиск в разделе"></label>${activeAdmin() ? `<button class="new-button" data-create="${kind}">＋ Добавить</button>` : ''}</div>
-  ${filterControls(all)}${kind === 'access' ? '<div class="security-note compact">ID подключений доступны читателям. Пароли, ключи и одноразовые коды здесь не храните.</div>' : ''}
-  <div id="list-results" class="list-grid">${found.length ? found.map(card).join('') : empty(all.length ? 'Ничего не найдено. Попробуйте другой запрос.' : 'В этом разделе пока нет записей.', kind)}</div></div></div>`;
+  return `<div class="workspace-layout ${selectedId ? 'has-selection' : ''}"><section class="workspace-list" aria-label="Список материалов"><div class="page-heading"><h1>${escapeHtml(rootNames[kind])}</h1>${activeAdmin() ? `<button class="button-quiet" data-create="${kind}" title="Добавить запись">＋</button>` : ''}</div><label class="search-wrap"><span>⌕</span><input id="list-search" type="search" placeholder="Поиск в теме…" value="${escapeHtml(query)}" aria-label="Поиск в разделе"></label><details class="workspace-sections" ${sectionId ? 'open' : ''}><summary>${icon('folder')}${sectionId ? escapeHtml(sectionTrail(sectionId)) : 'Все категории'}</summary>${tree(kind)}</details>${filterControls(all)}<div id="list-results" class="list-grid">${found.length ? found.map(card).join('') : empty('В этой теме пока нет записей или ничего не найдено.',kind)}</div></section><section class="workspace-detail" aria-label="Открытая запись">${selectedId ? detail() : `<div class="workspace-placeholder">${icon(kind)}<h2>Выберите запись</h2><p>Откройте материал слева, чтобы прочитать его здесь.</p>${activeAdmin() ? `<button class="button-primary" data-create="${kind}">Новая запись</button>` : ''}</div>`}</section></div>`;
 }
 function searchResults() {
   const found = searchEntries(filteredEntries(db.entries.filter(visibleEntry)));
@@ -212,10 +223,10 @@ async function loadComments(append = false) {
 function detail() {
   const item = db.entries.find(e => e.id === selectedId && visibleEntry(e)); if (!item) return '<button class="back-button" data-back>← Назад к списку</button><h1>Запись недоступна</h1><p>Она удалена или у вас нет доступа.</p>';
   const trail = sectionTrail(item.section_id);
-  return `<button class="back-button" data-back>← Назад к списку</button><article class="article"><div class="article-top"><span class="badge ${escapeHtml(item.type)}">${escapeHtml(rootNames[item.type])}</span>${item.visibility === 'admins' ? '<span class="private-chip">⌁ Только админам</span>' : ''}${entryBadges(item)}</div><h1>${escapeHtml(item.title)}</h1><div class="article-meta">${escapeHtml(trail)} · Обновлено ${date(item.updated_at)}</div>${item.type !== 'access' && item.summary ? `<p class="article-lead">${escapeHtml(item.summary)}</p>` : ''}
-  ${entryTags(item,true)}${item.type === 'access' ? `<div class="access-info"><div><small>ПРОГРАММА</small><strong>${escapeHtml(canonicalProgram(item.tool) || item.tool || '—')}</strong></div><div><small>АДРЕС / ID</small><strong>${escapeHtml(item.remote_id || '—')}</strong></div></div>${remoteActions(item)}` : ''}
+  return `<div class="detail-toolbar"><button class="back-button" data-back>← К списку</button><button class="button-quiet" data-copy-link>Копировать ссылку</button>${activeAdmin() ? `<button class="button-quiet" data-edit-entry="${escapeHtml(item.id)}">Редактировать</button>` : ''}</div><article class="article"><div class="article-top"><span class="badge ${escapeHtml(item.type)}">${escapeHtml(rootNames[item.type])}</span>${item.visibility === 'admins' ? '<span class="private-chip">⌁ Только админам</span>' : ''}${entryBadges(item)}</div><h1>${escapeHtml(item.title)}</h1><div class="article-meta">${escapeHtml(trail)} · Обновлено ${date(item.updated_at)}</div>${item.type !== 'access' && item.summary ? `<p class="article-lead">${escapeHtml(item.summary)}</p>` : ''}
+  ${entryTags(item,true)}${item.type === 'access' ? `<div class="access-info"><div><small>ПРОГРАММА</small><strong class="program-badge">${programIcon(item.tool)}${escapeHtml(canonicalProgram(item.tool) || item.tool || '—')}</strong></div><div><small>${canonicalProgram(item.tool) === 'Терминал' ? 'АДРЕС ПОДКЛЮЧЕНИЯ' : 'ID ПОДКЛЮЧЕНИЯ'}</small><strong class="connection-id">${escapeHtml(item.remote_id || '—')}</strong></div></div>${remoteActions(item)}` : ''}
   <div class="article-body">${(item.type === 'access' ? [] : item.blocks || []).map((b, i) => blockHtml({ ...b, id: String(i) })).join('') || (item.type === 'access' ? '' : '<p class="article-muted">Материал пока не заполнен.</p>')}</div>
-  ${relatedMaterials(item)}${item.type !== 'access' ? commentsPanel(item) : ''}${activeAdmin() ? `<div class="detail-actions"><button class="button-quiet" data-pin-entry="${escapeHtml(item.id)}">${item.pinned ? 'Открепить' : 'Закрепить'}</button><button class="button-quiet" data-edit-entry="${escapeHtml(item.id)}">Редактировать</button><button class="button-quiet" data-history="${escapeHtml(item.id)}">История изменений</button><button class="button-danger" data-delete-entry="${escapeHtml(item.id)}">В корзину</button></div><div id="history-panel"></div>` : ''}</article>`;
+  ${relatedMaterials(item)}${item.type !== 'access' ? commentsPanel(item) : ''}${activeAdmin() ? `<div class="detail-actions"><button class="button-quiet" data-pin-entry="${escapeHtml(item.id)}">${item.pinned ? 'Открепить' : 'Закрепить'}</button><button class="button-quiet" data-history="${escapeHtml(item.id)}">История изменений</button><button class="button-danger" data-delete-entry="${escapeHtml(item.id)}">В корзину</button></div><div id="history-panel"></div>` : ''}</article>`;
 }
 function collectionView(kind) {
   if (!activeAdmin()) return home();
@@ -231,7 +242,7 @@ function admin() {
   else body = `<div class="admin-categories">${['knowledge','cases','access'].map(kind => `<div class="admin-panel"><div class="admin-panel-head"><h2>${rootNames[kind]}</h2><button class="text-link" data-new-section="${kind}" data-parent="">＋ Раздел</button></div>${tree(kind,null,true)}</div>`).join('')}</div>`;
   return `<div class="page-heading"><div><span class="eyebrow">НАСТРОЙКИ ВИКИ</span><h1>Управление</h1><p>Разделы, права сотрудников и ссылки GLPI.</p></div><button class="button-quiet" data-reader-preview>Посмотреть как читатель</button></div><div class="tab-bar"><button class="${adminTab === 'sections' ? 'active' : ''}" data-admin-tab="sections">Разделы</button>${db.cloud ? `<button class="${adminTab === 'users' ? 'active' : ''}" data-admin-tab="users">Участники</button>` : ''}<button class="${adminTab === 'integrations' ? 'active' : ''}" data-admin-tab="integrations">GLPI</button></div>${body}`;
 }
-function auth() { return `<div class="auth-layout"><div><span class="eyebrow">КОМАНДНАЯ ВИКИ</span><h1>Вход в WikiHMRU</h1><p>Знания вашей команды — в одном защищённом рабочем пространстве.</p></div><form id="login-form" class="auth-card"><label class="field"><span>Рабочий email</span><input name="email" type="email" autocomplete="email" required></label><label class="field"><span>Пароль</span><input name="password" type="password" autocomplete="current-password" required></label><button class="button-primary" type="submit">Войти</button><p>Для доступа обратитесь к администратору вики.</p></form></div>`; }
+function auth() { return `<div class="auth-layout"><div><span class="eyebrow">КОМАНДНАЯ ВИКИ</span><h1>Вход в WikiHMRU</h1><p>Знания вашей команды — в одном защищённом рабочем пространстве.</p></div><form id="login-form" class="auth-card"><label class="field"><span>Рабочий email</span><input name="email" type="email" autocomplete="email" required></label><label class="field"><span>Пароль</span><input name="password" type="password" autocomplete="current-password" required></label><p id="login-error" role="alert" hidden></p><button class="button-primary" type="submit">Войти</button><p>Для доступа обратитесь к администратору вики.</p></form></div>`; }
 function invite() { return `<div class="auth-layout"><div><span class="eyebrow">ПРИГЛАШЕНИЕ</span><h1>Создайте пароль</h1><p>После сохранения откроется командная база знаний.</p></div><form id="invite-form" class="auth-card"><label class="field"><span>Новый пароль</span><input name="password" type="password" autocomplete="new-password" minlength="8" required></label><button class="button-primary" type="submit">Сохранить пароль</button></form></div>`; }
 async function hydrateImages(root = document) {
   for (const img of root.querySelectorAll('img[data-image-path]')) {
@@ -244,7 +255,7 @@ function render() {
   if (['drafts','trash','admin'].includes(view) && !activeAdmin()) { view = 'home'; selectedId = null; }
   if (db.cloud && db.needsPassword) $('#content').innerHTML = invite();
   else if (db.cloud && !db.session) $('#content').innerHTML = auth();
-  else $('#content').innerHTML = selectedId ? detail() : view === 'home' ? home() : view === 'admin' ? admin() : view === 'search' ? searchResults() : ['drafts','trash'].includes(view) ? collectionView(view) : listing(view);
+  else $('#content').innerHTML = ['knowledge','cases','access'].includes(view) ? listing(view) : selectedId ? detail() : view === 'home' ? home() : view === 'admin' ? admin() : view === 'search' ? searchResults() : ['drafts','trash'].includes(view) ? collectionView(view) : listing(view);
   const showApp = !db.cloud || (db.session && !db.needsPassword);
   document.querySelectorAll('.admin-only').forEach(el => { el.hidden = !activeAdmin() || !showApp; });
   $('.sidebar-foot').textContent = db.cloud ? 'Командная вики · данные в Supabase' : 'Локальная версия · данные в браузере';
@@ -252,12 +263,16 @@ function render() {
   $('#new-button').hidden = !activeAdmin() || !showApp;
   document.querySelectorAll('.side-nav [data-view]').forEach(btn => btn.classList.toggle('active', btn.dataset.view === view));
   $('#breadcrumb-current').textContent = rootNames[view] || 'Обзор';
+  $('#top-search-wrap').hidden = !showApp; closeSuggestions();
+  document.querySelectorAll('.side-nav [data-view]').forEach(btn => { btn.querySelector('.nav-icon').innerHTML = icon(btn.dataset.view); });
   $('#today').textContent = new Intl.DateTimeFormat('ru-RU', { day: 'numeric', month: 'long', year: 'numeric' }).format(new Date());
   for (const kind of ['knowledge','cases','access']) $(`#nav-${kind}-count`).textContent = entriesFor(kind).length;
   $('#export-button').hidden = db.cloud; $('#import-button').hidden = db.cloud;
   $('#logout-button')?.remove();
   if (db.cloud && db.session && !db.needsPassword) { const btn = document.createElement('button'); btn.id = 'logout-button'; btn.className = 'sidebar-action'; btn.textContent = '↪  Выйти из аккаунта'; $('.sidebar-bottom').prepend(btn); }
   if (showApp) syncRoute();
+  $('#content').getAnimations().forEach(a => a.cancel());
+  if (!matchMedia('(prefers-reduced-motion: reduce)').matches) $('#content').animate([{opacity:0.55, transform:'translateY(5px)'},{opacity:1,transform:'translateY(0)'}],{duration:170,easing:'ease-out'});
   hydrateImages($('#content'));
   if ($('#comments-panel')) loadComments();
 }
@@ -284,22 +299,32 @@ function renderBlocks() {
   }).join('') || '<p class="muted">Добавьте блоки, чтобы оформить материал.</p>';
   hydrateImages($('#blocks-list'));
 }
+function chooseTopic() {
+  if (!activeAdmin()) return;
+  $('#dialog-title').textContent = 'Новая запись';
+  $('#editor-fields').innerHTML = `<p class="muted">Выберите тему. На следующем шаге будут её категории и поля.</p><div class="topic-picker">${['knowledge','cases','access'].map(kind => `<button type="button" class="topic-button" data-choose-topic="${kind}">${icon(kind)}<strong>${rootNames[kind]}</strong><span>→</span></button>`).join('')}</div>`;
+  $('#save-draft-button').hidden = true; $('#save-entry-button').hidden = true;
+  $('#editor-dialog').showModal();
+}
 function openEditor(kind, id = null) {
   if (!activeAdmin()) return;
   const item = db.entries.find(e => e.id === id) || {};
-  const privateParent = item.section_id && ancestors(db.sections.find(s => s.id === item.section_id)).some(s => s.visibility === 'admins');
+  const category = item.section_id || (view === kind ? sectionId : null);
+  const privateParent = category && ancestors(db.sections.find(s => s.id === category)).some(s => s.visibility === 'admins');
   editingId = id; editorKind = kind; pendingFiles = new Map();
   draftBlocks = (item.blocks || []).map(b => ({ ...b, client_id: uuid() }));
   $('#dialog-title').textContent = id ? 'Редактировать запись' : 'Новая запись';
   if (kind === 'access') {
     const program = canonicalProgram(item.tool) || 'AnyDesk';
     const selectedSection = item.section_id || (view === 'access' ? sectionId : null) || '';
-    $('#editor-fields').innerHTML = `<div class="editor-top-grid">${field('title','Имя',item.title,{required:true,placeholder:'Например, сервер бухгалтерии'})}<label class="field"><span>Программа</span><select name="tool">${remotePrograms.map(p => `<option value="${p}" ${p === program ? 'selected' : ''}>${p}</option>`).join('')}</select></label>${field('remote_id','Адрес / ID подключения',item.remote_id,{required:true,placeholder:'192.168.1.10 или ID подключения'})}<label class="field"><span>Доступ</span><select name="visibility"><option value="all" ${item.visibility !== 'admins' && !privateParent ? 'selected' : ''}>Все читатели</option><option value="admins" ${item.visibility === 'admins' || privateParent ? 'selected' : ''}>Только администраторы</option></select></label><input type="hidden" name="section_id" value="${escapeHtml(selectedSection)}"></div><p class="muted">Для SSH: IP или имя сервера; можно указать user@host:port. По умолчанию порт 22.</p>`;
+    $('#editor-fields').innerHTML = `<div class="editor-top-grid">${field('title','Имя',item.title,{required:true,placeholder:'Например, сервер бухгалтерии'})}<label class="field"><span>Программа</span><select name="tool">${remotePrograms.map(p => `<option value="${p}" ${p === program ? 'selected' : ''}>${p}</option>`).join('')}</select></label>${field('remote_id','Адрес / ID подключения',item.remote_id,{required:true,placeholder:'192.168.1.10 или ID подключения'})}<label class="field"><span>Доступ</span><select name="visibility"><option value="all" ${item.visibility !== 'admins' && !privateParent ? 'selected' : ''}>Все читатели</option><option value="admins" ${item.visibility === 'admins' || privateParent ? 'selected' : ''}>Только администраторы</option></select></label><label class="field"><span>Категория</span><select name="section_id">${sectionOptions(kind,selectedSection)}</select></label></div><p class="muted">Для SSH: IP или имя сервера; можно указать user@host:port. По умолчанию порт 22.</p>`;
   } else {
-  $('#editor-fields').innerHTML = `<div class="editor-top-grid">${field('title','Название',item.title,{required:true,placeholder:'Короткое понятное название'})}${field('summary','Краткое описание',item.summary,{placeholder:'О чём материал'})}<label class="field"><span>Раздел</span><select name="section_id">${sectionOptions(kind,item.section_id)}</select></label><label class="field"><span>Доступ</span><select name="visibility"><option value="all" ${item.visibility !== 'admins' && !privateParent ? 'selected' : ''}>Все читатели</option><option value="admins" ${item.visibility === 'admins' || privateParent ? 'selected' : ''}>Только администраторы</option></select></label></div>
+  $('#editor-fields').innerHTML = `<div class="editor-top-grid">${field('title','Название',item.title,{required:true,placeholder:'Короткое понятное название'})}${field('summary','Краткое описание',item.summary,{placeholder:'О чём материал'})}<label class="field"><span>Раздел</span><select name="section_id">${sectionOptions(kind,item.section_id || (view === kind ? sectionId : ''))}</select></label><label class="field"><span>Доступ</span><select name="visibility"><option value="all" ${item.visibility !== 'admins' && !privateParent ? 'selected' : ''}>Все читатели</option><option value="admins" ${item.visibility === 'admins' || privateParent ? 'selected' : ''}>Только администраторы</option></select></label></div>
   ${metadataEditor(item)}<div class="template-toolbar"><label class="field"><span>Шаблон</span><select id="entry-template">${Object.entries(features.templates).map(([key,t]) => `<option value="${key}">${t.name}</option>`).join('')}</select></label><button type="button" class="button-quiet" data-apply-template>Применить шаблон</button></div><div class="block-area"><div class="block-area-head"><div><strong>Содержание</strong><p>Соберите карточку из блоков в нужном порядке.</p></div></div><div id="blocks-list"></div><div class="block-toolbar">${Object.entries(blockNames).map(([type,label]) => `<button type="button" data-add-block="${type}">＋ ${label}</button>`).join('')}</div></div>`;
     renderBlocks();
   }
+  $('#save-entry-button').hidden = false;
+  if (!id) $('#editor-fields').insertAdjacentHTML('afterbegin', `<label class="field topic-select"><span>Тема</span><select name="entry_type">${['knowledge','cases','access'].map(k => `<option value="${k}" ${k === kind ? 'selected' : ''}>${rootNames[k]}</option>`).join('')}</select></label>`);
   $('#save-draft-button').hidden = kind === 'access' || (id && item.publication_state !== 'draft');
   $('#save-entry-button').textContent = kind === 'access' ? 'Сохранить подключение' : id && item.publication_state !== 'draft' ? 'Сохранить изменения' : 'Опубликовать';
   $('#editor-dialog').showModal(); $('#editor-form [name=title]').focus();
@@ -346,10 +371,14 @@ document.addEventListener('click', async event => {
   if (button.id === 'comment-cancel') { $('#comment-form').reset(); button.hidden = true; return; }
   if (button.dataset.commentDelete) { if (!confirm('Удалить комментарий?')) return; try { await db.deleteComment(button.dataset.commentDelete); await loadComments(); } catch(e) { toast(e.message); } return; }
   if (button.dataset.section) { const kind = button.dataset.kind; view = kind; sectionId = button.dataset.section === 'all' ? null : button.dataset.section; selectedId = null; query = ''; render(); return; }
-  if (button.dataset.open) { const item = db.entries.find(e => e.id === button.dataset.open && visibleEntry(e)); if (!item) return; selectedId = item.id; if (view !== 'drafts') view = item.type; versions = null; render(); return; }
+  if (button.dataset.open) { const item = db.entries.find(e => e.id === button.dataset.open && visibleEntry(e)); if (!item) return; if (view !== item.type) { sectionId = null; query = ''; tagFilter = ''; statusFilter = ''; pinnedOnly = false; } selectedId = item.id; if (view !== 'drafts') view = item.type; versions = null; render(); return; }
   if (button.dataset.back !== undefined) { selectedId = null; render(); return; }
   if (button.dataset.create) return openEditor(button.dataset.create);
-  if (button.id === 'new-button') return openEditor(['knowledge','cases','access'].includes(view) ? view : 'knowledge');
+  if (button.id === 'new-button') return chooseTopic();
+  if (button.dataset.chooseTopic) return openEditor(button.dataset.chooseTopic);
+  if (button.id === 'sidebar-toggle') return sidebar(!document.body.classList.contains('sidebar-collapsed'));
+  if (button.dataset.copyLink !== undefined) { try { await navigator.clipboard.writeText(location.href); toast('Ссылка скопирована'); } catch { toast('Не удалось скопировать ссылку'); } return; }
+  if (button.dataset.searchAll !== undefined) return fullSearch();
   if (button.dataset.editEntry) return openEditor(db.entries.find(e => e.id === button.dataset.editEntry)?.type, button.dataset.editEntry);
   if (button.dataset.deleteEntry) { if (!confirm('Переместить запись в корзину? Администратор сможет её восстановить.')) return; try { await db.deleteEntry(button.dataset.deleteEntry); selectedId = null; render(); toast('Запись перемещена в корзину'); } catch (e) { toast(e.message); } return; }
   if (button.dataset.history) return showHistory(button.dataset.history);
@@ -396,6 +425,7 @@ $('#editor-fields').addEventListener('input', event => {
   if (key && draftBlocks[index]) draftBlocks[index][key] = event.target.value;
 });
 $('#editor-fields').addEventListener('change', event => {
+  if (event.target.name === 'entry_type') { const title = $('#editor-form [name=title]').value, kind = event.target.value; if (draftBlocks.length && !confirm('Сменить тему и очистить содержимое новой записи?')) { event.target.value = editorKind; return; } openEditor(kind); $('#editor-form [name=title]').value = title; return; }
   if (event.target.name === 'related_ids') { $('.related-picker summary').textContent = `Связанные материалы (${$('#related-options').querySelectorAll('input:checked').length})`; return; }
   if (event.target.name === 'section_id') {
     const section = db.sections.find(s => s.id === event.target.value);
@@ -415,6 +445,7 @@ $('#section-fields').addEventListener('change', event => {
 });
 $('#editor-form').addEventListener('submit', async event => {
   event.preventDefault(); const form = event.target; if (!form.reportValidity()) return;
+  if (!form.querySelector('[name=title]')) return;
   const data = Object.fromEntries(new FormData(form).entries()); const old = db.entries.find(e => e.id === editingId);
   const id = editingId || uuid();
   const privateSection = db.sections.find(s => s.id === data.section_id);
@@ -458,13 +489,48 @@ $('#content').addEventListener('submit', async event => {
   if (event.target.id === 'login-form') {
     event.preventDefault(); const form = event.target; if (!form.reportValidity()) return;
     const data = Object.fromEntries(new FormData(form).entries()); const btn = form.querySelector('button'); btn.disabled = true;
-    try { await db.login(data.email, data.password); render(); } catch (e) { toast('Ошибка входа: ' + e.message); } finally { btn.disabled = false; }
+    $('#login-error').hidden = true;
+    try { await db.login(data.email.trim(), data.password); render(); } catch (e) { const text = (e.code === 'invalid_credentials' || /invalid.?login.?credentials|invalid_credentials/i.test(e.message)) ? 'Неверный логин или пароль' : /email.?not.?confirmed/i.test(e.message) ? 'Подтвердите email перед входом' : /rate.?limit|too many/i.test(e.message) ? 'Слишком много попыток входа. Попробуйте позже' : 'Не удалось войти. Проверьте соединение и попробуйте ещё раз'; $('#login-error').textContent = text; $('#login-error').hidden = false; } finally { btn.disabled = false; }
   }
   if (event.target.id === 'invite-form') {
     event.preventDefault(); const form = event.target; if (!form.reportValidity()) return; const btn = form.querySelector('button'); btn.disabled = true;
     try { await db.setInvitePassword(new FormData(form).get('password')); render(); toast('Пароль сохранён'); } catch (e) { toast(e.message); } finally { btn.disabled = false; }
   }
 });
+function sidebar(collapsed) {
+  document.body.classList.toggle('sidebar-collapsed', collapsed);
+  $('#sidebar-toggle').setAttribute('aria-expanded', String(!collapsed));
+  $('#sidebar-toggle').setAttribute('aria-label', collapsed ? 'Развернуть меню' : 'Свернуть меню');
+  $('#sidebar-toggle').title = collapsed ? 'Развернуть меню' : 'Свернуть меню';
+  localStorage.setItem('wikihmru-sidebar', collapsed ? 'collapsed' : 'expanded');
+}
+sidebar(localStorage.getItem('wikihmru-sidebar') !== 'expanded');
+let suggestionIndex = -1;
+function closeSuggestions() { $('#search-suggestions').hidden = true; $('#top-search').setAttribute('aria-expanded','false'); $('#top-search').removeAttribute('aria-activedescendant'); suggestionIndex = -1; }
+function suggest() {
+  const input = $('#top-search'), value = input.value.trim(), panel = $('#search-suggestions');
+  if (!value || (db.cloud && (!db.session || db.needsPassword))) return closeSuggestions();
+  const results = searchEntries(db.entries.filter(visibleEntry),value).slice(0,7);
+  panel.innerHTML = results.map((e,i) => `<button id="suggestion-${i}" role="option" aria-selected="false" data-open="${escapeHtml(e.id)}">${icon(e.type)}<span><strong>${escapeHtml(e.title)}</strong><small>${escapeHtml(rootNames[e.type])} · ${escapeHtml(sectionTrail(e.section_id))}${e.glpi_ticket_ids?.length ? ' · GLPI #' + e.glpi_ticket_ids.join(', #') : ''}</small></span></button>`).join('') + (results.length ? '<button class="search-all" data-search-all>Все результаты →</button>' : '<p>Ничего не найдено. Попробуйте другое слово.</p>');
+  panel.hidden = false; input.setAttribute('aria-expanded','true'); suggestionIndex = -1;
+}
+function fullSearch() { query = $('#top-search').value.trim(); view = 'search'; sectionId = null; selectedId = null; tagFilter = ''; statusFilter = ''; pinnedOnly = false; render(); }
+$('#top-search').addEventListener('input',suggest);
+$('#top-search').addEventListener('focus',suggest);
+$('#top-search').addEventListener('keydown',event => {
+  const options = [...$('#search-suggestions').querySelectorAll('[role=option]')];
+  if (event.key === 'Escape') return closeSuggestions();
+  if (['ArrowDown','ArrowUp'].includes(event.key)) {
+    event.preventDefault(); if ($('#search-suggestions').hidden) suggest();
+    if (!options.length) return;
+    suggestionIndex = (suggestionIndex + (event.key === 'ArrowDown' ? 1 : -1) + options.length) % options.length;
+    options.forEach((el,i) => el.setAttribute('aria-selected',String(i === suggestionIndex)));
+    $('#top-search').setAttribute('aria-activedescendant',options[suggestionIndex].id); options[suggestionIndex].scrollIntoView({block:'nearest'});
+  }
+  if (event.key === 'Enter') { event.preventDefault(); if (!$('#search-suggestions').hidden && options[suggestionIndex]) options[suggestionIndex].click(); else fullSearch(); }
+});
+document.addEventListener('click',event => { if (!event.target.closest('#top-search-wrap')) closeSuggestions(); });
+document.addEventListener('keydown',event => { if (event.key === 'Tab') closeSuggestions(); });
 $('#export-button').addEventListener('click', () => {
   const blob = new Blob([JSON.stringify(db.exportLocal(),null,2)],{type:'application/json'}), url = URL.createObjectURL(blob), a = document.createElement('a');
   a.href = url; a.download = `WikiHMRU-${new Date().toISOString().slice(0,10)}.json`; a.click(); setTimeout(() => URL.revokeObjectURL(url),1000);

@@ -33,7 +33,7 @@
       let data = null;
       try { data = await response.json(); } catch { /* empty response */ }
       if (response.status === 401 && auth && retry && await this.refresh()) return this.api(path, options, auth, false);
-      if (!response.ok) throw Error(data?.msg || data?.error_description || data?.message || `Ошибка сервера: ${response.status}`);
+      if (!response.ok) { const error = Error(data?.msg || data?.error_description || data?.message || `Ошибка сервера: ${response.status}`); error.code = data?.code || data?.error_code; error.status = response.status; throw error; }
       return data;
     },
     async refresh() {

@@ -2,31 +2,33 @@
 <html lang="ru">
   <head>
     <meta charset="UTF-8" />
+    <base href="/WikiHMRU/" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; style-src-attr 'unsafe-inline'; font-src 'self'; connect-src 'self' https://*.supabase.co; img-src 'self' blob: data:; object-src 'none'; base-uri 'self'; form-action 'self'" />
     <meta name="theme-color" content="#171e28" />
     <meta name="description" content="Рабочая база знаний специалиста технической поддержки" />
     <title>WikiHMRU — вики техподдержки</title>
     <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
-    <link rel="stylesheet" href="./styles.css?v=20261015-catalog-v1" />
-    <script src="./config.js?v=20261015-catalog-v1" defer></script>
-    <script src="./features.js?v=20261015-catalog-v1" defer></script>
-    <script src="./store.js?v=20261015-catalog-v1" defer></script>
-    <script src="./app.js?v=20261015-catalog-v1" defer></script>
+    <link rel="stylesheet" href="./styles.css?v=20261015-workspace-v2" />
+    <script src="./config.js?v=20261015-workspace-v2" defer></script>
+    <script src="./features.js?v=20261015-workspace-v2" defer></script>
+    <script src="./store.js?v=20261015-workspace-v2" defer></script>
+    <script src="./app.js?v=20261015-workspace-v2" defer></script>
   </head>
   <body>
     <div class="app-shell">
-      <aside class="sidebar">
+      <aside class="sidebar" id="sidebar">
+        <button id="sidebar-toggle" class="sidebar-toggle" type="button" aria-controls="sidebar" aria-expanded="false" aria-label="Развернуть меню" title="Развернуть меню">☰</button>
         <div class="brand"><div class="brand-mark" aria-hidden="true">W</div><div><strong>WikiHMRU</strong><small>Техническая поддержка</small></div></div>
         <div class="workspace-label">НАВИГАЦИЯ</div>
         <nav class="side-nav" aria-label="Разделы">
-          <button data-view="home" class="nav-item active"><span class="nav-icon">⌂</span> Обзор</button>
-          <button data-view="knowledge" class="nav-item"><span class="nav-icon">▤</span> База знаний <span id="nav-knowledge-count" class="nav-count"></span></button>
-          <button data-view="cases" class="nav-item"><span class="nav-icon">◇</span> Сложные случаи <span id="nav-cases-count" class="nav-count"></span></button>
-          <button data-view="access" class="nav-item"><span class="nav-icon">⌁</span> Удалённый доступ <span id="nav-access-count" class="nav-count"></span></button>
-          <button data-view="drafts" class="nav-item admin-only" hidden><span class="nav-icon">✎</span> Черновики</button>
-          <button data-view="trash" class="nav-item admin-only" hidden><span class="nav-icon">♲</span> Корзина</button>
-          <button data-view="admin" class="nav-item" id="admin-nav" hidden><span class="nav-icon">⚙</span> Управление</button>
+          <button data-view="home" class="nav-item active" title="Обзор"><span class="nav-icon">⌂</span> <span class="nav-label">Обзор</span></button>
+          <button data-view="knowledge" class="nav-item" title="База знаний"><span class="nav-icon">▤</span> <span class="nav-label">База знаний</span> <span id="nav-knowledge-count" class="nav-count"></span></button>
+          <button data-view="cases" class="nav-item" title="Сложные случаи"><span class="nav-icon">◇</span> <span class="nav-label">Сложные случаи</span> <span id="nav-cases-count" class="nav-count"></span></button>
+          <button data-view="access" class="nav-item" title="Удалённый доступ"><span class="nav-icon">⌁</span> <span class="nav-label">Удалённый доступ</span> <span id="nav-access-count" class="nav-count"></span></button>
+          <button data-view="drafts" class="nav-item admin-only" hidden title="Черновики"><span class="nav-icon">✎</span> <span class="nav-label">Черновики</span></button>
+          <button data-view="trash" class="nav-item admin-only" hidden title="Корзина"><span class="nav-icon">♲</span> <span class="nav-label">Корзина</span></button>
+          <button data-view="admin" class="nav-item" id="admin-nav" title="Управление" hidden title="admin"><span class="nav-icon">⚙</span> <span class="nav-label">Управление</span></button>
         </nav>
         <div class="sidebar-bottom">
           <button id="export-button" class="sidebar-action">↓ &nbsp; Скачать копию данных</button>
@@ -36,7 +38,7 @@
         </div>
       </aside>
       <main class="main-area">
-        <header class="topbar"><div class="breadcrumb">Рабочее пространство <span>/</span> <strong id="breadcrumb-current">Обзор</strong></div><div class="top-actions"><span class="today" id="today"></span><button class="theme-button" id="theme-toggle" type="button" aria-label="Переключить тему" title="Переключить тему">◐</button><button class="new-button" id="new-button"><span>＋</span> Новая запись</button></div></header>
+        <header class="topbar"><div class="breadcrumb">Рабочее пространство <span>/</span> <strong id="breadcrumb-current">Обзор</strong></div><div class="top-actions"><span class="today" id="today" hidden></span><div class="top-search" id="top-search-wrap" hidden><label><span aria-hidden="true">⌕</span><input id="top-search" type="search" placeholder="Поиск по вики…" aria-label="Поиск по всей вики" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="search-suggestions" autocomplete="off"></label><div id="search-suggestions" class="search-suggestions" role="listbox" hidden></div></div><button class="theme-button" id="theme-toggle" type="button" aria-label="Переключить тему" title="Переключить тему">◐</button><button class="new-button" id="new-button"><span>＋</span> Новая запись</button></div></header>
         <div class="content" id="content"></div>
       </main>
     </div>
