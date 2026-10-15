@@ -8,10 +8,11 @@
     <meta name="description" content="Рабочая база знаний специалиста технической поддержки" />
     <title>WikiHMRU — вики техподдержки</title>
     <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
-    <link rel="stylesheet" href="./styles.css?v=20261015-terminal" />
-    <script src="./config.js?v=20261015-terminal" defer></script>
-    <script src="./store.js?v=20261015-terminal" defer></script>
-    <script src="./app.js?v=20261015-terminal" defer></script>
+    <link rel="stylesheet" href="./styles.css?v=20261015-catalog-v1" />
+    <script src="./config.js?v=20261015-catalog-v1" defer></script>
+    <script src="./features.js?v=20261015-catalog-v1" defer></script>
+    <script src="./store.js?v=20261015-catalog-v1" defer></script>
+    <script src="./app.js?v=20261015-catalog-v1" defer></script>
   </head>
   <body>
     <div class="app-shell">
@@ -23,6 +24,8 @@
           <button data-view="knowledge" class="nav-item"><span class="nav-icon">▤</span> База знаний <span id="nav-knowledge-count" class="nav-count"></span></button>
           <button data-view="cases" class="nav-item"><span class="nav-icon">◇</span> Сложные случаи <span id="nav-cases-count" class="nav-count"></span></button>
           <button data-view="access" class="nav-item"><span class="nav-icon">⌁</span> Удалённый доступ <span id="nav-access-count" class="nav-count"></span></button>
+          <button data-view="drafts" class="nav-item admin-only" hidden><span class="nav-icon">✎</span> Черновики</button>
+          <button data-view="trash" class="nav-item admin-only" hidden><span class="nav-icon">♲</span> Корзина</button>
           <button data-view="admin" class="nav-item" id="admin-nav" hidden><span class="nav-icon">⚙</span> Управление</button>
         </nav>
         <div class="sidebar-bottom">
@@ -41,7 +44,7 @@
       <form id="editor-form" method="dialog" novalidate>
         <div class="dialog-head"><div><span class="eyebrow">РАБОЧАЯ ВИКИ</span><h2 id="dialog-title">Новая запись</h2></div><button type="button" class="icon-button" id="close-dialog" aria-label="Закрыть">×</button></div>
         <div id="editor-fields"></div>
-        <div class="dialog-actions"><button type="button" class="button-quiet" id="cancel-dialog">Отмена</button><button type="submit" class="button-primary">Сохранить запись</button></div>
+        <div class="dialog-actions"><button type="button" class="button-quiet" id="cancel-dialog">Отмена</button><button type="submit" class="button-quiet" id="save-draft-button" name="publication_state" value="draft" hidden>Сохранить черновик</button><button type="submit" class="button-primary" id="save-entry-button" name="publication_state" value="published">Опубликовать</button></div>
       </form>
     </dialog>
     <dialog id="section-dialog" class="editor-dialog">

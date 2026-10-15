@@ -1,12 +1,15 @@
 (() => {
   'use strict';
   const cfg = window.WIKI_CONFIG || {};
+  const features = window.wikiFeatures;
   const cloud = Boolean(cfg.supabaseUrl && cfg.supabaseAnonKey);
   const base = String(cfg.supabaseUrl || '').replace(/\/$/, '');
   const SESSION_KEY = 'wikihmru-session-v1';
   const ENTRIES_KEY = 'opora-v2-entries';
   const SECTIONS_KEY = 'opora-v2-sections';
   const HISTORY_KEY = 'opora-v2-history';
+  const COMMENTS_KEY = 'wikihmru-comments-v1';
+  const SETTINGS_KEY = 'wikihmru-settings-v1';
   const makeId = () => crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
   const read = (key) => { try { return JSON.parse(localStorage.getItem(key)); } catch { return null; } };
   const readSession = () => { try { return JSON.parse(sessionStorage.getItem(SESSION_KEY)); } catch { return null; } };
@@ -14,12 +17,14 @@
   const store = {
     cloud, role: cloud ? 'reader' : 'admin', session: readSession(), user: null,
     needsPassword: false, entries: [], sections: [], profiles: [], history: [],
-    imageUrls: new Map(),
+    imageUrls: new Map(), comments: [], settings: { glpi_ticket_url_template: features.glpiDefault },
     isAdmin() { return this.role === 'admin'; },
     saveLocal() {
       localStorage.setItem(ENTRIES_KEY, JSON.stringify(this.entries));
       localStorage.setItem(SECTIONS_KEY, JSON.stringify(this.sections));
       localStorage.setItem(HISTORY_KEY, JSON.stringify(this.history));
+      localStorage.setItem(COMMENTS_KEY, JSON.stringify(this.comments));
+      localStorage.setItem(SETTINGS_KEY, JSON.stringify(this.settings));
     },
     async api(path, options = {}, auth = true, retry = true) {
       const headers = { apikey: cfg.supabaseAnonKey, 'Content-Type': 'application/json', ...options.headers };
@@ -54,6 +59,9 @@
         this.entries = read(ENTRIES_KEY) || (Array.isArray(old) ? old.map((item) => this.convertOld(item)) : [
           { id: makeId(), type: 'knowledge', title: 'Принтер не печатает', summary: 'Базовая диагностика печати.', section_id: this.sections.find(s => s.kind === 'knowledge' && s.title === 'МФУ и принтеры')?.id, visibility: 'all', blocks: [{ type: 'heading', text: 'Проверка' }, { type: 'text', text: 'Проверьте питание, подключение, выбранный принтер и очередь печати.' }, { type: 'heading', text: 'Решение' }, { type: 'text', text: 'Очистите зависшую очередь и напечатайте тестовую страницу. Зафиксируйте код ошибки, если проблема повторится.' }], updated_at: new Date().toISOString() }
         ]);
+        this.entries = this.entries.map(features.normalizeEntry);
+        this.comments = read(COMMENTS_KEY) || [];
+        this.settings = read(SETTINGS_KEY) || { glpi_ticket_url_template: features.glpiDefault };
         this.history = read(HISTORY_KEY) || [];
         this.saveLocal();
         return;
@@ -93,25 +101,29 @@
       for (const url of this.imageUrls.values()) URL.revokeObjectURL(url);
       this.imageUrls.clear();
       this.session = null; this.user = null; this.role = cloud ? 'reader' : 'admin';
-      this.entries = []; this.sections = []; this.profiles = [];
+      this.entries = []; this.sections = []; this.profiles = []; this.comments = []; this.settings = {};
       sessionStorage.removeItem(SESSION_KEY);
     },
     async load() {
       if (!cloud) return;
       this.user = await this.api('/auth/v1/user');
-      const [profiles, sections, entries] = await Promise.all([
+      const [profiles, sections, entries, settings] = await Promise.all([
         this.api(`/rest/v1/profiles?select=id,email,role&order=email.asc`),
         this.api('/rest/v1/sections?select=*&order=sort_order.asc,title.asc'),
-        this.api('/rest/v1/entries?select=*&order=updated_at.desc')
+        this.api('/rest/v1/entries?select=*&order=updated_at.desc'),
+        this.api('/rest/v1/wiki_settings?id=eq.1&select=glpi_ticket_url_template')
       ]);
       this.profiles = profiles;
       this.role = profiles.find(p => p.id === this.user.id)?.role || 'reader';
       this.sections = sections;
-      this.entries = entries.map(e => ({ ...e, blocks: e.blocks || [] }));
+      this.entries = entries.map(e => features.normalizeEntry({ ...e, blocks: e.blocks || [] }));
+      this.settings = settings[0] || { glpi_ticket_url_template: '' };
     },
     async saveEntry(item) {
       if (!this.isAdmin()) throw Error('Недостаточно прав');
-      const fields = ['id', 'type', 'section_id', 'title', 'summary', 'visibility', 'blocks', 'device', 'tool', 'remote_id', 'author_id'];
+      item = features.normalizeEntry({ ...this.entries.find(e => e.id === item.id), ...item });
+      item.tags = features.parseTags(item.tags); item.glpi_ticket_ids = features.parseTickets(item.glpi_ticket_ids);
+      const fields = ['id', 'type', 'section_id', 'title', 'summary', 'visibility', 'blocks', 'device', 'tool', 'remote_id', 'author_id', 'pinned', 'tags', 'publication_state', 'relevance', 'related_ids', 'glpi_ticket_ids', 'deleted_at'];
       const record = Object.fromEntries(fields.map(key => [key, item[key] ?? (key === 'blocks' ? [] : null)]));
       record.author_id = item.author_id || this.user?.id || null;
       if (!cloud) {
@@ -124,15 +136,48 @@
       await this.api('/rest/v1/entries' + (exists ? `?id=eq.${encodeURIComponent(item.id)}` : ''), { method: exists ? 'PATCH' : 'POST', headers: { Prefer: 'return=minimal' }, body: JSON.stringify(record) });
       await this.load();
     },
-    async deleteEntry(id) {
+    async patchEntry(id, patch) {
       if (!this.isAdmin()) throw Error('Недостаточно прав');
-      if (!cloud) {
-        const old = this.entries.find(e => e.id === id);
-        if (old) this.history.unshift({ id: makeId(), entry_id: id, snapshot: structuredClone(old), changed_at: new Date().toISOString(), changed_by: 'local', action: 'DELETE' });
-        this.entries = this.entries.filter(e => e.id !== id); this.saveLocal(); return;
-      }
-      await this.api(`/rest/v1/entries?id=eq.${encodeURIComponent(id)}`, { method: 'DELETE' });
+      const item = this.entries.find(e => e.id === id);
+      if (!item) throw Error('Запись недоступна');
+      if (!cloud) return this.saveEntry({ ...item, ...patch });
+      await this.api(`/rest/v1/entries?id=eq.${encodeURIComponent(id)}`, { method: 'PATCH', headers: { Prefer: 'return=minimal' }, body: JSON.stringify(patch) });
       await this.load();
+    },
+    async deleteEntry(id) { return this.patchEntry(id, { deleted_at: new Date().toISOString() }); },
+    async restoreEntry(id) { return this.patchEntry(id, { deleted_at: null }); },
+    async commentsFor(entryId, offset = 0) {
+      if (!cloud) return this.comments.filter(c => c.entry_id === entryId).sort((a,b) => b.created_at.localeCompare(a.created_at)).slice(offset, offset + 51);
+      return this.api(`/rest/v1/entry_comments?entry_id=eq.${encodeURIComponent(entryId)}&select=*&order=created_at.desc,id.asc&limit=51&offset=${offset}`);
+    },
+    async saveComment(entryId, body, id = null) {
+      body = String(body || '').trim();
+      if (!body || body.length > 4000) throw Error('Комментарий: от 1 до 4000 символов');
+      if (!this.entries.some(e => e.id === entryId && e.type !== 'access' && !e.deleted_at)) throw Error('Статья недоступна');
+      const author = this.user?.id || 'local';
+      if (!cloud) {
+        const old = this.comments.find(c => c.id === id);
+        if (id && (!old || old.entry_id !== entryId || (old.author_id !== author && !this.isAdmin()))) throw Error('Недостаточно прав');
+        const now = new Date().toISOString();
+        const comment = { ...old, id: id || makeId(), entry_id: entryId, author_id: old?.author_id || author, author_name: old?.author_name || 'Локальный участник', body, created_at: old?.created_at || now, updated_at: now };
+        this.comments = [comment, ...this.comments.filter(c => c.id !== comment.id)]; this.saveLocal(); return;
+      }
+      await this.api('/rest/v1/entry_comments' + (id ? `?id=eq.${encodeURIComponent(id)}&entry_id=eq.${encodeURIComponent(entryId)}` : ''), { method: id ? 'PATCH' : 'POST', headers: { Prefer: 'return=minimal' }, body: JSON.stringify(id ? { body } : { id: makeId(), entry_id: entryId, author_id: author, body }) });
+    },
+    async deleteComment(id) {
+      if (!cloud) {
+        const old = this.comments.find(c => c.id === id);
+        if (!old || (old.author_id !== (this.user?.id || 'local') && !this.isAdmin())) throw Error('Недостаточно прав');
+        this.comments = this.comments.filter(c => c.id !== id); this.saveLocal(); return;
+      }
+      await this.api(`/rest/v1/entry_comments?id=eq.${encodeURIComponent(id)}`, { method: 'DELETE' });
+    },
+    async saveSettings(template) {
+      if (!this.isAdmin()) throw Error('Недостаточно прав');
+      template = features.validateGlpiTemplate(template);
+      if (cloud) await this.api('/rest/v1/wiki_settings?id=eq.1', { method: 'PATCH', body: JSON.stringify({ glpi_ticket_url_template: template }) });
+      this.settings = { glpi_ticket_url_template: template };
+      if (!cloud) this.saveLocal();
     },
     async saveSection(section) {
       if (!this.isAdmin()) throw Error('Недостаточно прав');
@@ -184,11 +229,11 @@
       this.imageUrls.set(path, url);
       return url;
     },
-    exportLocal() { return { format: 'opora-v2', entries: this.entries, sections: this.sections, history: this.history }; },
+    exportLocal() { return { format: 'opora-v2', entries: this.entries, sections: this.sections, history: this.history, comments: this.comments, settings: this.settings }; },
     importLocal(data) {
       if (cloud) throw Error('Импорт доступен только в локальном режиме');
       if (data.format !== 'opora-v2' || !Array.isArray(data.entries) || !Array.isArray(data.sections)) throw Error('Неверный формат копии');
-      this.entries = data.entries; this.sections = data.sections; this.history = Array.isArray(data.history) ? data.history : [];
+      this.entries = data.entries.map(features.normalizeEntry); this.sections = data.sections; this.comments = Array.isArray(data.comments) ? data.comments : []; this.settings = data.settings || { glpi_ticket_url_template: features.glpiDefault }; this.history = Array.isArray(data.history) ? data.history : [];
       this.saveLocal();
     }
   };

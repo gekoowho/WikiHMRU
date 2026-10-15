@@ -11,7 +11,39 @@ concurrency:
   group: pages
   cancel-in-progress: true
 jobs:
+  verify:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verify data helpers
+        run: node scripts/test-core.cjs
+      - name: Install browser test tools
+        run: |
+          npm install --prefix "$RUNNER_TEMP/wiki-test-tools" --no-audit --no-fund --ignore-scripts playwright@1.56.1
+          node "$RUNNER_TEMP/wiki-test-tools/node_modules/playwright/cli.js" install --with-deps chromium
+      - name: Verify site in browser
+        run: |
+          python3 -m http.server 8765 --bind 127.0.0.1 >/tmp/wiki-test-server.log 2>&1 &
+          wiki_server_pid=$!
+          trap 'kill "$wiki_server_pid"' EXIT
+          for attempt in 1 2 3 4 5; do
+            if curl -fsS http://127.0.0.1:8765/ >/dev/null; then break; fi
+            sleep 1
+          done
+          NODE_PATH="$RUNNER_TEMP/wiki-test-tools/node_modules" node scripts/test-site.cjs
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: browser-test-failure-${{ github.run_attempt }}
+          path: test-results/
+          if-no-files-found: ignore
   deploy:
+    needs: verify
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
@@ -22,7 +54,7 @@ jobs:
       - name: Prepare site
         run: |
           mkdir -p _site
-          cp index.html styles.css store.js app.js config.js favicon.svg _site/
+          cp index.html styles.css store.js features.js app.js config.js favicon.svg _site/
       - uses: actions/upload-pages-artifact@v3
         with:
           name: github-pages-${{ github.run_attempt }}
