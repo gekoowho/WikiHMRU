@@ -44,5 +44,18 @@
       return new URL(safe.replace('{id}', String(Number(id)))).href;
     } catch { return ''; }
   }
-  window.wikiFeatures = { glpiDefault: 'https://helpdesk.hmru.ru:8080/front/ticket.form.php?id={id}', relevance, templates, templateBlocks, parseTags, parseTickets, normalizeEntry, validateGlpiTemplate, ticketUrl };
+  function versionChanges(before, after) {
+    before = normalizeEntry(before || {}); after = normalizeEntry(after || {});
+    const fields = ['title','summary','type','section_id','visibility','tool','remote_id','device','pinned','tags','glpi_ticket_ids','related_ids','publication_state','relevance','deleted_at'];
+    const changes = [];
+    const equal = (a,b) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
+    for (const field of fields) if (!equal(before[field],after[field])) changes.push({field,before:before[field],after:after[field]});
+    const old = before.blocks || [], next = after.blocks || [];
+    for (let index = 0; index < Math.max(old.length,next.length); index++) {
+      const clean = b => b ? Object.fromEntries(['type','text','caption','path','href'].map(k => [k,b[k] || ''])) : null;
+      if (!equal(clean(old[index]),clean(next[index]))) changes.push({field:'block',index,before:old[index] || null,after:next[index] || null});
+    }
+    return changes;
+  }
+  window.wikiFeatures = { glpiDefault: 'https://helpdesk.hmru.ru:8080/front/ticket.form.php?id={id}', relevance, templates, templateBlocks, parseTags, parseTickets, normalizeEntry, validateGlpiTemplate, ticketUrl, versionChanges };
 })();

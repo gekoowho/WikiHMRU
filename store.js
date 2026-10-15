@@ -203,7 +203,7 @@
     async versions(id) {
       if (!this.isAdmin()) return [];
       if (!cloud) return this.history.filter(v => v.entry_id === id).sort((a, b) => new Date(b.changed_at) - new Date(a.changed_at));
-      return this.api(`/rest/v1/entry_versions?select=*&entry_id=eq.${encodeURIComponent(id)}&order=changed_at.desc`);
+      return this.api(`/rest/v1/entry_versions?select=*&entry_id=eq.${encodeURIComponent(id)}&order=changed_at.desc,id.desc`);
     },
     async uploadImage(entryId, file) {
       if (!this.isAdmin()) throw Error('Недостаточно прав');

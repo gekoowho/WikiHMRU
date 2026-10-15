@@ -111,7 +111,7 @@ function card(entry) {
   const markup = `<button class="entry-card ${selectedId === entry.id ? 'selected' : ''}" data-open="${escapeHtml(entry.id)}"><span class="card-icon">${pictogram}</span><div class="card-content"><h3>${escapeHtml(entry.title)}</h3><p>${escapeHtml(excerpt)}</p><div class="card-top">${entry.visibility === 'admins' ? '<span class="private-chip">Только админам</span>' : ''}${entryBadges(entry)}</div>${entryTags(entry)}<div class="card-foot"><span>${icon('folder')}${escapeHtml(sec)}</span><span>${date(entry.updated_at)}</span></div></div></button>`;
   if (entry.type !== 'access') return markup;
   const link = remoteLink(entry);
-  return `<div class="remote-card">${markup}<div class="remote-card-actions">${link ? `<a class="button-primary" href="${escapeHtml(link.href)}" data-launch-remote>Подключиться</a>` : ''}<button class="button-quiet" data-copy-remote="${escapeHtml(entry.id)}">Копировать ID</button></div></div>`;
+  return `<div class="remote-card ${selectedId === entry.id ? 'selected' : ''}">${markup}<div class="remote-card-actions">${link ? `<a class="button-primary" href="${escapeHtml(link.href)}" data-launch-remote>Подключиться</a>` : ''}<button class="button-quiet" data-copy-remote="${escapeHtml(entry.id)}">Копировать ID</button></div></div>`;
 }
 function empty(message, kind) { return `<div class="empty-state"><div class="empty-icon">◇</div><h3>Пока здесь пусто</h3><p>${escapeHtml(message)}</p>${activeAdmin() ? `<button data-create="${kind}">Добавить запись</button>` : ''}</div>`; }
 function tree(kind, selected = sectionId, admin = false) {
@@ -341,9 +341,39 @@ function openSection(kind, id = null, parent = null) {
   $('#section-fields').innerHTML = `${field('title','Название раздела',item.title,{required:true,placeholder:'Например, IP-телефония'})}<label class="field"><span>Родительский раздел</span><select name="parent_id">${sectionOptions(kind,item.parent_id || parent,id)}</select></label><label class="field"><span>Доступ</span><select name="visibility"><option value="all" ${item.visibility !== 'admins' && !privateParent ? 'selected' : ''}>Все читатели</option><option value="admins" ${item.visibility === 'admins' || privateParent ? 'selected' : ''}>Только администраторы</option></select></label>${id ? '<button type="button" class="button-danger" data-delete-section="'+escapeHtml(id)+'">Удалить раздел</button>' : ''}`;
   $('#section-dialog').showModal(); $('#section-form [name=title]').focus();
 }
+function historyValue(field, value) {
+  if (value === null || value === undefined || value === '') return '—';
+  if (field === 'section_id') return sectionTrail(value);
+  if (field === 'type') return rootNames[value] || value;
+  if (field === 'visibility') return value === 'admins' ? 'Только администраторы' : 'Все читатели';
+  if (field === 'pinned') return value ? 'Закреплено' : 'Не закреплено';
+  if (field === 'publication_state') return value === 'draft' ? 'Черновик' : 'Опубликовано';
+  if (field === 'relevance') return features.relevance[value] || value;
+  if (field === 'deleted_at') return value ? 'В корзине' : 'Доступна';
+  if (field === 'related_ids') return value.map(id => db.entries.find(e => e.id === id)?.title || id).join(', ') || '—';
+  if (Array.isArray(value)) return value.join(', ') || '—';
+  if (field === 'block') return [blockNames[value.type] || value.type,value.text,value.caption,value.href,value.path ? 'Фото прикреплено' : ''].filter(Boolean).join('\n');
+  return String(value);
+}
+function historyDiff(before,after) {
+  const labels = {title:'Название',summary:'Описание',type:'Тема',section_id:'Категория',visibility:'Доступ',tool:'Программа',remote_id:'Адрес / ID подключения',device:'Устройство',pinned:'Закрепление',tags:'Теги',glpi_ticket_ids:'Заявки GLPI',related_ids:'Связанные материалы',publication_state:'Публикация',relevance:'Актуальность',deleted_at:'Корзина'};
+  const changes = features.versionChanges(before,after);
+  return changes.length ? `<ul class="history-changes">${changes.map(c => {
+    const blockLabel = !c.before ? 'добавлен' : !c.after ? 'удалён' : c.before.path !== c.after.path && c.before.type === 'image' && c.after.type === 'image' ? 'изображение заменено' : 'изменён';
+    return `<li><strong>${escapeHtml(c.field === 'block' ? `Блок ${c.index+1}: ${blockLabel}` : labels[c.field])}</strong><div class="diff-values"><div><small>Было</small><pre>${escapeHtml(historyValue(c.field,c.before))}</pre></div><div><small>Стало</small><pre>${escapeHtml(historyValue(c.field,c.after))}</pre></div></div></li>`;
+  }).join('')}</ul>` : '<p class="muted">Содержимое не менялось: обновлены служебные данные записи.</p>';
+}
 async function showHistory(id) {
-  try { versions = await db.versions(id); const panel = $('#history-panel'); if (!panel) return;
-    panel.innerHTML = `<div class="history-panel"><h2>История изменений</h2>${versions.length ? versions.map(v => `<div class="version-row"><div><strong>${escapeHtml(v.snapshot?.title || 'Без названия')}</strong><span>${dateTime(v.changed_at)} · ${escapeHtml(db.profiles.find(p => p.id === v.changed_by)?.email || (v.changed_by === 'local' ? 'Локальный редактор' : 'Администратор'))}</span></div><button class="button-quiet" data-restore="${escapeHtml(v.id)}">Восстановить</button></div>`).join('') : '<p class="muted">Предыдущих версий пока нет.</p>'}</div>`;
+  const entry = db.entries.find(e => e.id === id), requestPanel = $('#history-panel');
+  if (!requestPanel) return;
+  try {
+    const loaded = await db.versions(id);
+    if (!requestPanel.isConnected || selectedId !== id) return;
+    versions = loaded;
+    requestPanel.innerHTML = `<div class="history-panel"><h2>История изменений</h2>${versions.length ? versions.map((v,index) => {
+      const after = index ? versions[index-1].snapshot : entry;
+      return `<section class="version-item"><div class="version-row"><div><strong>${escapeHtml(v.snapshot?.title || 'Без названия')}</strong><span>${dateTime(v.changed_at)} · ${escapeHtml(db.profiles.find(p => p.id === v.changed_by)?.email || (v.changed_by === 'local' ? 'Локальный редактор' : 'Администратор'))}</span></div><button class="button-quiet" data-restore="${escapeHtml(v.id)}">Восстановить эту версию</button></div><details class="version-diff" ${index === 0 ? 'open' : ''}><summary>Что изменилось</summary>${historyDiff(v.snapshot,after)}</details></section>`;
+    }).join('') : '<p class="muted">Предыдущих версий пока нет.</p>'}</div>`;
   } catch (error) { toast(error.message); }
 }
 function updateListSearch() {

@@ -534,3 +534,36 @@ a.button-primary { display:inline-flex; align-items:center; justify-content:cent
 .remote-setup summary { cursor:pointer; color:var(--primary); }
 .remote-setup li { margin:7px 0; }
 .setup-command { white-space:pre-wrap; overflow-wrap:anywhere; padding:12px; border:1px solid var(--border); border-radius:6px; background:var(--surface-soft); font-size:12px; }
+
+/* Filter chevrons keep a consistent inset from the field edge. */
+.filter-controls select {
+  appearance:none;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%2366798d' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m4 6 4 4 4-4'/%3E%3C/svg%3E");
+  background-repeat:no-repeat; background-position:right 12px center; background-size:14px 14px;
+  padding-right:36px;
+}
+.workspace-list .filter-controls select { padding-right:36px; }
+:root[data-theme="dark"] .filter-controls select {
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%23a4b4c8' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m4 6 4 4 4-4'/%3E%3C/svg%3E");
+}
+/* Selection covers the entire remote record, including its action area. */
+.remote-card { transition:background-color .2s ease,border-color .2s ease; }
+.remote-card.selected, .remote-card:hover { background:var(--hover); border-color:#719ac6; }
+.remote-card.selected { box-shadow:inset 3px 0 #719ac6; }
+.remote-card .entry-card, .remote-card .entry-card:hover, .remote-card .entry-card.selected {
+  background:transparent; box-shadow:none;
+}
+@media(forced-colors:active) { .filter-controls select { appearance:auto; background-image:none; } }
+
+.version-item { padding:16px 0; border-bottom:1px solid var(--border); }
+.version-row { align-items:center; flex-wrap:wrap; gap:10px; }
+.version-diff { margin-top:12px; }
+.version-diff > summary { cursor:pointer; font-size:13px; color:var(--primary); }
+.history-changes { list-style:none; padding:0; margin:12px 0; }
+.history-changes li { padding:12px 0; }
+.history-changes li > strong { font-size:13px; }
+.diff-values { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:10px; margin-top:8px; }
+.diff-values > div { padding:10px; min-width:0; border:1px solid var(--border); border-radius:6px; background:var(--surface-soft); }
+.diff-values small { color:var(--muted); }
+.diff-values pre { white-space:pre-wrap; overflow-wrap:anywhere; font:inherit; font-size:12px; margin:6px 0 0; max-height:280px; overflow:auto; }
+@media(max-width:650px) { .diff-values { grid-template-columns:minmax(0,1fr); } }
