@@ -182,7 +182,7 @@ function listing(kind) {
   const sectionSet = sectionId ? descendants(sectionId) : null;
   const all = entriesFor(kind).filter(e => !sectionSet || sectionSet.has(e.section_id));
   const found = searchEntries(filteredEntries(all));
-  return `<div class="workspace-layout ${selectedId ? 'has-selection' : ''}"><section class="workspace-list" aria-label="Список материалов"><div class="page-heading"><h1>${escapeHtml(rootNames[kind])}</h1>${activeAdmin() ? `<button class="button-quiet" data-create="${kind}" title="Добавить запись">＋</button>` : ''}</div><label class="search-wrap"><span class="search-icon" aria-hidden="true">${icon('search')}</span><input id="list-search" type="search" placeholder="Поиск в теме…" value="${escapeHtml(query)}" aria-label="Поиск в разделе"></label><details class="workspace-sections" ${sectionId ? 'open' : ''}><summary>${icon('folder')}${sectionId ? escapeHtml(sectionTrail(sectionId)) : 'Все категории'}</summary>${tree(kind)}</details>${filterControls(all)}<div id="list-results" class="list-grid">${found.length ? found.map(card).join('') : empty('В этой теме пока нет записей или ничего не найдено.',kind)}</div></section><section class="workspace-detail" aria-label="Открытая запись">${selectedId ? detail() : `<div class="workspace-placeholder">${icon(kind)}<h2>Выберите запись</h2><p>Откройте материал слева, чтобы прочитать его здесь.</p>${activeAdmin() ? `<button class="button-primary" data-create="${kind}">Новая запись</button>` : ''}</div>`}</section></div>`;
+  return `<div class="workspace-layout ${selectedId ? 'has-selection' : ''}"><section class="workspace-list" aria-label="Список материалов"><div class="page-heading"><h1>${escapeHtml(rootNames[kind])}</h1>${activeAdmin() ? `<button class="button-quiet" data-create="${kind}" title="Добавить запись">＋</button>` : ''}</div><label class="search-wrap"><span class="search-icon" aria-hidden="true">${icon('search')}</span><input id="list-search" type="search" placeholder="Поиск в теме…" value="${escapeHtml(query)}" aria-label="Поиск в разделе"></label><details class="workspace-sections" ${sectionId ? 'open' : ''}><summary>${icon('folder')}${sectionId ? escapeHtml(sectionTrail(sectionId)) : 'Все категории'}</summary>${tree(kind)}</details>${filterControls(all)}${kind === 'access' && activeAdmin() ? '<button type="button" class="button-quiet import-access-button" data-import-access>Импорт из файла</button>' : ''}<div id="list-results" class="list-grid">${found.length ? found.map(card).join('') : empty('В этой теме пока нет записей или ничего не найдено.',kind)}</div></section><section class="workspace-detail" aria-label="Открытая запись">${selectedId ? detail() : `<div class="workspace-placeholder">${icon(kind)}<h2>Выберите запись</h2><p>Откройте материал слева, чтобы прочитать его здесь.</p>${activeAdmin() ? `<button class="button-primary" data-create="${kind}">Новая запись</button>` : ''}</div>`}</section></div>`;
 }
 function searchResults() {
   const found = searchEntries(filteredEntries(db.entries.filter(visibleEntry)));
@@ -235,7 +235,7 @@ function collectionView(kind) {
   if (!activeAdmin()) return home();
   const all = db.entries.filter(e => kind === 'trash' ? Boolean(e.deleted_at) : !e.deleted_at && e.publication_state === 'draft');
   const found = searchEntries(all);
-  return `<div class="page-heading"><div><h1>${rootNames[kind]}</h1><p>${kind === 'trash' ? 'Удалённые записи, комментарии и фото сохраняются. Запись можно восстановить.' : 'Материалы до публикации видят только администраторы.'}</p></div></div><div class="toolbar"><label class="search-wrap"><span class="search-icon" aria-hidden="true">${icon('search')}</span><input id="collection-search" type="search" value="${escapeHtml(query)}" placeholder="Поиск..."></label>${kind === 'drafts' ? '<button class="new-button" data-create="knowledge">＋ Создать статью</button>' : ''}</div><div id="collection-results" class="list-grid">${found.length ? found.map(e => kind === 'trash' ? `<div class="trash-card"><div><h3>${escapeHtml(e.title)}</h3><p>${rootNames[e.type]} · Удалено ${dateTime(e.deleted_at)}${e.publication_state === 'draft' ? ' · Черновик' : ''}</p></div><button class="button-quiet" data-restore-entry="${escapeHtml(e.id)}">Восстановить</button></div>` : card(e)).join('') : '<p class="muted">Здесь пока нет записей.</p>'}</div>`;
+  return `<div class="page-heading"><div><h1>${rootNames[kind]}</h1><p>${kind === 'trash' ? 'Удалённые записи, комментарии и фото сохраняются. Запись можно восстановить.' : 'Материалы до публикации видят только администраторы.'}</p></div></div><div class="toolbar"><label class="search-wrap"><span class="search-icon" aria-hidden="true">${icon('search')}</span><input id="collection-search" type="search" value="${escapeHtml(query)}" placeholder="Поиск..."></label>${kind === 'drafts' ? '<button class="new-button" data-create="knowledge">＋ Создать статью</button>' : all.length ? `<button class="button-danger" data-purge-trash>Очистить корзину (${all.length})</button>` : ''}</div><div id="collection-results" class="list-grid">${found.length ? found.map(e => kind === 'trash' ? `<div class="trash-card"><div><h3>${escapeHtml(e.title)}</h3><p>${rootNames[e.type]} · Удалено ${dateTime(e.deleted_at)}${e.publication_state === 'draft' ? ' · Черновик' : ''}</p></div><div class="detail-actions"><button class="button-quiet" data-restore-entry="${escapeHtml(e.id)}">Восстановить</button><button class="button-danger" data-purge-entry="${escapeHtml(e.id)}">Удалить навсегда</button></div></div>` : card(e)).join('') : '<p class="muted">Здесь пока нет записей.</p>'}</div>`;
 }
 function admin() {
   if (!activeAdmin()) return home();
@@ -397,11 +397,21 @@ document.addEventListener('click', async event => {
     if (!['AnyDesk','RuDesktop','Terminal'].includes(program)) return;
     try { const response = await fetch(new URL('scripts/install-remote-links.ps1',document.baseURI)); if (!response.ok) throw Error(); const script = (await response.text()).replace('[string]$Program,', `[string]$Program = '${program}',`); const url = URL.createObjectURL(new Blob([script],{type:'text/plain;charset=utf-8'})), a = document.createElement('a'); a.href = url; a.download = `WikiHMRU-${program}.ps1`; a.click(); setTimeout(() => URL.revokeObjectURL(url),1000); } catch { toast('Не удалось скачать настройку. Попробуйте ещё раз'); } return;
   }
+  if (button.dataset.importAccess !== undefined) { if (!activeAdmin()) return; ++importFileRequest; importRows=[]; importQueue=[]; $('#remote-import-file').value=''; $('#remote-import-controls').innerHTML=''; $('#remote-import-preview').innerHTML=''; $('#remote-import-message').textContent=''; $('#remote-import-save').disabled=true; $('#remote-import-dialog').showModal(); return; }
+  if (button.dataset.closeImport !== undefined) { if(!importBusy) { ++importFileRequest; $('#remote-import-dialog').close(); } return; }
   if (button.id === 'theme-toggle') return theme(document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark');
   if (button.dataset.view) return go(button.dataset.view);
   if (button.dataset.filterTag) { go(button.dataset.kind); tagFilter = button.dataset.filterTag; render(); return; }
   if (button.dataset.resetFilters !== undefined) { tagFilter = ''; statusFilter = ''; pinnedOnly = false; render(); return; }
   if (button.dataset.pinEntry) { try { const item = db.entries.find(e => e.id === button.dataset.pinEntry); await db.patchEntry(item.id,{pinned:!item.pinned}); render(); } catch(e) { toast(e.message); } return; }
+  if (button.dataset.purgeEntry || button.dataset.purgeTrash !== undefined) {
+    if (!activeAdmin()) return;
+    const ids=button.dataset.purgeEntry ? [button.dataset.purgeEntry] : db.entries.filter(e=>e.deleted_at).map(e=>e.id);
+    if (!ids.length || !confirm(`Удалить навсегда ${ids.length} записей, их комментарии, историю и фото? Восстановление будет невозможно.`)) return;
+    button.disabled=true;let count=0,warning='';
+    try { for (const id of ids) { const result=await db.purgeEntry(id);if(result)warning=result;count++; } render();toast(warning || `Удалено навсегда: ${count}`); }
+    catch(e){render();toast(`Удалено: ${count}. ${e.message}`);}finally{button.disabled=false;}return;
+  }
   if (button.dataset.restoreEntry) { try { await db.restoreEntry(button.dataset.restoreEntry); render(); toast('Запись восстановлена'); } catch(e) { toast(e.message); } return; }
   if (button.dataset.applyTemplate !== undefined) { if (draftBlocks.length && !confirm('Заменить содержимое выбранным шаблоном?')) return; for (const b of draftBlocks) if (b.preview) URL.revokeObjectURL(b.preview); pendingFiles.clear(); draftBlocks = features.templateBlocks($('#entry-template').value).map(b => ({...b,client_id:uuid()})); renderBlocks(); return; }
   if (button.dataset.commentMore !== undefined) return loadComments(true);
@@ -536,6 +546,66 @@ $('#content').addEventListener('submit', async event => {
     try { await db.setInvitePassword(new FormData(form).get('password')); render(); toast('Пароль сохранён'); } catch (e) { toast(e.message); } finally { btn.disabled = false; }
   }
 });
+let importSheets=[], importText='', importRows=[], importMap={}, importQueue=[], importBusy=false, importFileRequest=0;
+const importFields={title:'Имя',remote_id:'Адрес / ID',tool:'Программа',visibility:'Доступ'};
+function setupImportControls() {
+  const sheet=Number($('#import-sheet')?.value || 0);
+  importRows=importSheets[sheet]?.rows || [];
+  if (!importRows.length || importRows.length>501) throw Error('Пустой файл или больше 500 записей');
+  const width=Math.max(...importRows.map(r=>r.length)); if(width>50)throw Error('До 50 колонок в файле');
+  importMap=window.wikiImport.mapping(importRows[0]);
+  const header=Object.values(importMap).some(v=>v>=0);
+  const previousSection=sectionId || '';
+  $('#remote-import-controls').innerHTML=`${importSheets.length>1 ? `<label class="field"><span>Лист Excel</span><select id="import-sheet">${importSheets.map((s,i)=>`<option value="${i}" ${i===sheet?'selected':''}>${escapeHtml(s.name)}</option>`).join('')}</select></label>`:''}${importText ? `<label class="field"><span>Разделитель</span><select id="import-delimiter"><option value="auto">Определить автоматически</option><option value="tab">Табуляция</option><option value=";">Точка с запятой</option><option value=",">Запятая</option><option value="|">Вертикальная черта</option><option value="spaces">Два и более пробелов</option></select></label>`:''}<label class="check-field"><input id="import-header" type="checkbox" ${header?'checked':''}> Первая строка — названия колонок</label><div class="editor-top-grid">${Object.entries(importFields).map(([key,label])=>`<label class="field"><span>${label}</span><select data-import-map="${key}"><option value="-1">${['tool','visibility'].includes(key)?'Общее значение ниже':'Выберите колонку'}</option>${Array.from({length:width},(_,i)=>`<option value="${i}" ${importMap[key]===i?'selected':''}>${i+1}: ${escapeHtml(importRows[0][i] || 'Колонка '+(i+1))}</option>`).join('')}</select></label>`).join('')}<label class="field"><span>Общая программа</span><select id="import-program">${remotePrograms.map(p=>`<option>${p}</option>`).join('')}</select></label><label class="field"><span>Общий доступ</span><select id="import-visibility"><option value="all">Все читатели</option><option value="admins">Только администраторы</option></select></label><label class="field"><span>Категория для всех записей</span><select id="import-section">${sectionOptions('access',previousSection)}</select></label></div>`;
+  if(!header){ if(width>1){importMap.title=0;importMap.remote_id=1;$('[data-import-map=title]').value='0';$('[data-import-map=remote_id]').value='1';} }
+  previewImport();
+}
+function previewImport() {
+  if(importBusy)return;
+  importQueue=[];
+  const controls=$('#remote-import-controls'); if(!controls.querySelector('#import-header'))return;
+  const map=Object.fromEntries([...controls.querySelectorAll('[data-import-map]')].map(el=>[el.dataset.importMap,Number(el.value)]));
+  const header=$('#import-header').checked, cat=$('#import-section').value, privateCategory=cat && ancestors(db.sections.find(s=>s.id===cat)).some(s=>s.visibility==='admins');
+  const used=Object.values(map).filter(i=>i>=0);const error=map.title<0||map.remote_id<0 ? 'Назначьте колонки имени и ID / адреса.' : new Set(used).size!==used.length ? 'Для каждого поля выберите отдельную колонку.' : '';
+  const rows=importRows.slice(header?1:0);if(rows.length>500){$('#remote-import-message').textContent='До 500 записей за импорт';$('#remote-import-save').disabled=true;return;}
+  const seen=new Set(db.entries.filter(e=>e.type==='access').map(e=>canonicalProgram(e.tool)+'|'+String(e.remote_id||'').replace(/\s/g,'').toLowerCase()));
+  const preview=rows.map((r,index)=>{
+    const title=String(r[map.title]||'').trim(), remote_id=String(r[map.remote_id]||'').trim(), tool=map.tool<0?$('#import-program').value:window.wikiImport.program(r[map.tool]);
+    const v=map.visibility<0?$('#import-visibility').value:String(r[map.visibility]||'').trim().toLowerCase();
+    const all=['all','все','все читатели','читатели','общий','reader'], admins=['admins','admin','администраторы','только администраторы','только админам','закрытый'];
+    const visibility=privateCategory?'admins':all.includes(v)?'all':admins.includes(v)?'admins':'';
+    const item={id:uuid(),type:'access',title,remote_id,tool,visibility,section_id:cat||null,blocks:[],summary:'',device:'',author_id:db.user?.id||null};
+    const key=tool+'|'+remote_id.replace(/\s/g,'').toLowerCase();
+    let status=error||(!title?'Нет имени':!tool?'Неизвестная программа':!visibility?'Неизвестный доступ':!remoteLink(item)?'Некорректный адрес / ID':seen.has(key)?'Повтор: пропускается':'Готово');
+    if(status==='Готово'){seen.add(key);importQueue.push(item);}
+    return `<tr><td>${index+(header?2:1)}</td><td>${escapeHtml(title)}</td><td>${escapeHtml(remote_id)}</td><td>${escapeHtml(tool)}</td><td>${visibility==='admins'?'Только админам':visibility==='all'?'Все читатели':'—'}</td><td>${escapeHtml(status)}</td></tr>`;
+  });
+  $('#remote-import-message').textContent=error||`Готово к импорту: ${importQueue.length} из ${rows.length}. Ошибки и повторы будут пропущены.`;
+  $('#remote-import-preview').innerHTML=`<div class="import-table-wrap"><table><thead><tr><th>Строка</th><th>Имя</th><th>Адрес / ID</th><th>Программа</th><th>Доступ</th><th>Проверка</th></tr></thead><tbody>${preview.join('')}</tbody></table></div>`;
+  $('#remote-import-save').disabled=!importQueue.length||!activeAdmin();$('#remote-import-save').textContent=`Импортировать ${importQueue.length} записей`;
+}
+$('#remote-import-file').addEventListener('change',async event=>{
+  const request=++importFileRequest,file=event.target.files[0]; if(!file)return;
+  $('#remote-import-message').textContent='Чтение файла…';$('#remote-import-controls').innerHTML='';$('#remote-import-preview').innerHTML='';$('#remote-import-save').disabled=true;
+  try{
+    if(file.size>5*1024*1024)throw Error('Файл должен быть меньше 5 МБ');
+    const bytes=await file.arrayBuffer();if(request!==importFileRequest)return;importText='';
+    if(/\.xlsx$/i.test(file.name))importSheets=await window.wikiImport.xlsx(bytes);
+    else if(/\.(csv|tsv|txt)$/i.test(file.name)){let decoder=new TextDecoder('utf-8',{fatal:true});try{importText=decoder.decode(bytes);}catch{importText=new TextDecoder('windows-1251').decode(bytes);}importSheets=[{name:file.name,rows:window.wikiImport.parseText(importText)}];}
+    else throw Error('Поддерживаются TXT, CSV, TSV и XLSX. Старый XLS сохраните как XLSX или CSV');
+    if(request!==importFileRequest)return;setupImportControls();
+  }catch(e){if(request===importFileRequest){$('#remote-import-message').textContent=e.message;$('#remote-import-controls').innerHTML='';$('#remote-import-preview').innerHTML='';importQueue=[];}}
+});
+$('#remote-import-controls').addEventListener('change',event=>{
+  try{if(event.target.id==='import-sheet')setupImportControls();else if(event.target.id==='import-delimiter'){const value=event.target.value;importSheets=[{name:'Текст',rows:window.wikiImport.parseText(importText,value==='tab'?'\t':value)}];setupImportControls();$('#import-delimiter').value=value;}else previewImport();}catch(e){$('#remote-import-message').textContent=e.message;$('#remote-import-save').disabled=true;}
+});
+$('#remote-import-save').addEventListener('click',async()=>{
+  if(!activeAdmin()||importBusy||!importQueue.length)return;
+  previewImport();const batch=importQueue.slice(); if(!batch.length)return;
+  importBusy=true;const dialog=$('#remote-import-dialog');dialog.querySelectorAll('button,input,select').forEach(el=>el.disabled=true);$('#remote-import-message').textContent=`Сохранение ${batch.length} записей…`;
+  try{await db.importAccess(batch);dialog.close();go('access');toast(`Импортировано подключений: ${batch.length}`);}catch(e){$('#remote-import-message').textContent='Не удалось сохранить: '+e.message;}finally{importBusy=false;dialog.querySelectorAll('button,input,select').forEach(el=>el.disabled=false);if(dialog.open)previewImport();}
+});
+$('#remote-import-dialog').addEventListener('cancel',event=>{if(importBusy)event.preventDefault();});
 function sidebar(collapsed) {
   document.body.classList.toggle('sidebar-collapsed', collapsed);
   $('#sidebar-toggle').setAttribute('aria-expanded', String(!collapsed));

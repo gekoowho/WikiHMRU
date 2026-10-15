@@ -9,11 +9,12 @@
     <meta name="description" content="Рабочая база знаний специалиста технической поддержки" />
     <title>WikiHMRU — вики техподдержки</title>
     <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
-    <link rel="stylesheet" href="./styles.css?v=20261015-workspace-v6" />
-    <script src="./config.js?v=20261015-workspace-v6" defer></script>
-    <script src="./features.js?v=20261015-workspace-v6" defer></script>
-    <script src="./store.js?v=20261015-workspace-v6" defer></script>
-    <script src="./app.js?v=20261015-workspace-v6" defer></script>
+    <link rel="stylesheet" href="./styles.css?v=20261015-workspace-v7" />
+    <script src="./config.js?v=20261015-workspace-v7" defer></script>
+    <script src="./features.js?v=20261015-workspace-v7" defer></script>
+    <script src="./store.js?v=20261015-workspace-v7" defer></script>
+    <script src="./remote-import.js?v=20261015-workspace-v7" defer></script>
+    <script src="./app.js?v=20261015-workspace-v7" defer></script>
   </head>
   <body>
     <div class="app-shell">
@@ -55,6 +56,12 @@
         <div id="section-fields"></div>
         <div class="dialog-actions"><button type="button" class="button-quiet" data-close-section>Отмена</button><button type="submit" class="button-primary">Сохранить раздел</button></div>
       </form>
+    </dialog>
+    <dialog id="remote-import-dialog" class="editor-dialog">
+      <div class="import-dialog-body"><div class="dialog-head"><h2>Импорт подключений</h2><button type="button" class="icon-button" data-close-import aria-label="Закрыть">×</button></div>
+      <label class="field"><span>TXT, CSV, TSV или XLSX · до 5 МБ и 500 записей</span><input id="remote-import-file" type="file" accept=".txt,.csv,.tsv,.xlsx"></label>
+      <p class="muted">Файл обрабатывается в браузере. Выберите, где имя, адрес / ID, программа и доступ. Лишние колонки не сохраняются.</p><div id="remote-import-controls"></div><p id="remote-import-message" role="status"></p><div id="remote-import-preview"></div>
+      <div class="dialog-actions"><button type="button" class="button-quiet" data-close-import>Отмена</button><button type="button" class="button-primary" id="remote-import-save" disabled>Импортировать</button></div></div>
     </dialog>
     <div id="toast" class="toast" role="status" aria-live="polite"></div>
   </body>

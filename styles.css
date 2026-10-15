@@ -572,3 +572,10 @@ a.button-primary { display:inline-flex; align-items:center; justify-content:cent
 .card-title-button { padding:0; border:0; background:transparent; color:inherit; font:inherit; text-align:left; }
 .card-title-button:hover { text-decoration:underline; }
 .entry-card .ticket-chip { cursor:pointer; }
+
+.import-dialog-body { padding:26px; max-height:90vh; overflow:auto; }
+.import-table-wrap { overflow:auto; max-height:340px; margin:16px 0; }
+.import-table-wrap table { border-collapse:collapse; width:100%; font-size:12px; }
+.import-table-wrap th,.import-table-wrap td { padding:9px; text-align:left; border-bottom:1px solid var(--border); overflow-wrap:anywhere; min-width:75px; }
+.import-table-wrap th { position:sticky; top:0; background:var(--surface-soft); }
+.import-access-button { margin-bottom:14px; width:100%; }

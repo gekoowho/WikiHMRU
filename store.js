@@ -136,6 +136,13 @@
       await this.api('/rest/v1/entries' + (exists ? `?id=eq.${encodeURIComponent(item.id)}` : ''), { method: exists ? 'PATCH' : 'POST', headers: { Prefer: 'return=minimal' }, body: JSON.stringify(record) });
       await this.load();
     },
+    async importAccess(items) {
+      if (!this.isAdmin() || !items.length || items.length > 500 || items.some(e=>e.type !== 'access')) throw Error('Недостаточно прав или неверный список записей');
+      const records=items.map(e=>features.normalizeEntry(e));
+      if (!cloud) { for (const e of records) await this.saveEntry(e); return; }
+      const saved=await this.api('/rest/v1/entries',{method:'POST',headers:{Prefer:'return=representation'},body:JSON.stringify(records)});
+      this.entries=[...saved.map(features.normalizeEntry),...this.entries];
+    },
     async patchEntry(id, patch) {
       if (!this.isAdmin()) throw Error('Недостаточно прав');
       const item = this.entries.find(e => e.id === id);
@@ -146,6 +153,21 @@
     },
     async deleteEntry(id) { return this.patchEntry(id, { deleted_at: new Date().toISOString() }); },
     async restoreEntry(id) { return this.patchEntry(id, { deleted_at: null }); },
+    async purgeEntry(id) {
+      if (!this.isAdmin()) throw Error('Недостаточно прав');
+      const item=this.entries.find(e=>e.id===id && e.deleted_at);
+      if (!item) throw Error('Окончательно удалить можно только запись из корзины');
+      if (!cloud) { this.entries=this.entries.filter(e=>e.id!==id);this.history=this.history.filter(v=>v.entry_id!==id);this.comments=this.comments.filter(c=>c.entry_id!==id);this.saveLocal();return; }
+      const removed=await this.api('/rest/v1/rpc/purge_wiki_entry',{method:'POST',body:JSON.stringify({target_id:id})});
+      if (!removed) throw Error('Запись уже восстановлена или удалена. Обновите страницу');
+      this.entries=this.entries.filter(e=>e.id!==id);
+      try {
+        let paths=[], offset=0;
+        while(true){const page=await this.api('/storage/v1/object/list/wiki-images',{method:'POST',body:JSON.stringify({prefix:id+'/',limit:1000,offset,sortBy:{column:'name',order:'asc'}})});paths.push(...page.filter(f=>f.id && f.name).map(f=>id+'/'+f.name));if(page.length<1000)break;offset+=1000;}
+        for(let i=0;i<paths.length;i+=100)await this.api('/storage/v1/object/wiki-images',{method:'DELETE',body:JSON.stringify({prefixes:paths.slice(i,i+100)})});
+        for (const [path,url] of this.imageUrls) if(path.startsWith(id+'/')){URL.revokeObjectURL(url);this.imageUrls.delete(path);}
+      } catch { return 'Запись удалена, но не удалось очистить её фото в хранилище'; }
+    },
     async commentsFor(entryId, offset = 0) {
       if (!cloud) return this.comments.filter(c => c.entry_id === entryId).sort((a,b) => b.created_at.localeCompare(a.created_at)).slice(offset, offset + 51);
       return this.api(`/rest/v1/entry_comments?entry_id=eq.${encodeURIComponent(entryId)}&select=*&order=created_at.desc,id.asc&limit=51&offset=${offset}`);
