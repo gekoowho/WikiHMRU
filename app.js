@@ -88,10 +88,7 @@ function closeModal(dialog) {
   const parent=dialog.parentNode, next=dialog.nextSibling;
   dialog.remove(); parent.insertBefore(dialog,next);
 }
-async function closeEditorAfterSave() {
-  closeModal($('#editor-dialog'));
-  await new Promise(resolve=>requestAnimationFrame(resolve));
-}
+function closeEditorAfterSave() { closeModal($('#editor-dialog')); }
 let editorSaving=false;
 function toast(message) { const el = $('#toast'); el.textContent = message; el.classList.add('show'); clearTimeout(toastTimer); toastTimer = setTimeout(() => el.classList.remove('show'), 3800); }
 function theme(mode) { document.documentElement.dataset.theme = mode; localStorage.setItem('opora-theme', mode); $('#theme-toggle').textContent = mode === 'dark' ? '☀' : '☾'; $('#theme-toggle').title = mode === 'dark' ? 'Светлая тема' : 'Тёмная тема'; }
@@ -549,7 +546,7 @@ $('#editor-form').addEventListener('submit', async event => {
     for (const { file, i } of uploads) blocks[i].path = await db.uploadImage(id, file);
     await db.saveEntry({ ...base, blocks });
     for (const block of draftBlocks) if (block.preview) URL.revokeObjectURL(block.preview);
-    await closeEditorAfterSave(); selectedId = id; view = base.publication_state === 'draft' ? 'drafts' : editorKind; render(); $('#content').setAttribute('tabindex','-1'); $('#content').focus({preventScroll:true}); toast(base.publication_state === 'draft' ? 'Черновик сохранён' : 'Запись сохранена');
+    closeEditorAfterSave(); selectedId = id; view = base.publication_state === 'draft' ? 'drafts' : editorKind; render(); $('#content').setAttribute('tabindex','-1'); requestAnimationFrame(()=>{if(!document.querySelector('dialog[open]')) $('#content').focus({preventScroll:true});}); toast(base.publication_state === 'draft' ? 'Черновик сохранён' : 'Запись сохранена');
   } catch (e) { toast('Не удалось сохранить: ' + e.message); }
   finally { editorSaving=false; buttons.forEach(button => { button.disabled = false; }); }
 });
