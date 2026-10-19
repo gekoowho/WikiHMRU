@@ -79,6 +79,20 @@ function singleRemoteActions(item) {
   return `<div class="detail-actions">${link ? `<a class="button-primary" href="${escapeHtml(link.href)}" data-launch-remote>${link.label}</a>` : ''}<button class="button-quiet" data-copy-remote="${escapeHtml(item.id)}" data-copy-program="${escapeHtml(item.tool)}">Скопировать ID</button></div>${link ? `<details class="remote-setup"><summary>Приложение не открывается?</summary><p>${program === 'AnyDesk' ? 'Для запуска AnyDesk браузер должен знать, каким приложением открывать ссылку. Если используется portable-версия или кнопка ничего не делает, настройте запуск один раз.' : 'Настройте запуск один раз на этом Windows-компьютере. После этого кнопка передаст адрес / ID приложению.'}</p><ol><li>Скачайте настройку для ${escapeHtml(program)}.</li><li>Откройте PowerShell и выполните команду ниже. Если приложение не найдено, выберите его exe-файл.</li><li>Нажмите «Подключиться» и разрешите браузеру открыть приложение.</li></ol><button class="button-quiet" data-download-launcher="${escapeHtml(setupProgram)}">Скачать настройку ${escapeHtml(program)}</button><pre class="setup-command"><code>powershell -NoProfile -ExecutionPolicy Bypass -File "$env:USERPROFILE\\Downloads\\WikiHMRU-${escapeHtml(setupProgram)}.ps1"</code></pre><p class="muted">При сохранении в другую папку укажите свой путь к скачанному файлу. Настройка действует только для текущего пользователя Windows.</p></details>` : ''}`;
 }
 
+// Open one native modal per editing session; changing the form is not a new modal.
+function openModal(dialog) { if (!dialog.open) dialog.showModal(); }
+function closeModal(dialog) {
+  dialog.close();
+  // Detach the closed dialog so its native backdrop and inert state are released
+  // before rebuilding the workspace (including browsers that defer top-layer cleanup).
+  const parent=dialog.parentNode, next=dialog.nextSibling;
+  dialog.remove(); parent.insertBefore(dialog,next);
+}
+async function closeEditorAfterSave() {
+  closeModal($('#editor-dialog'));
+  await new Promise(resolve=>requestAnimationFrame(resolve));
+}
+let editorSaving=false;
 function toast(message) { const el = $('#toast'); el.textContent = message; el.classList.add('show'); clearTimeout(toastTimer); toastTimer = setTimeout(() => el.classList.remove('show'), 3800); }
 function theme(mode) { document.documentElement.dataset.theme = mode; localStorage.setItem('opora-theme', mode); $('#theme-toggle').textContent = mode === 'dark' ? '☀' : '☾'; $('#theme-toggle').title = mode === 'dark' ? 'Светлая тема' : 'Тёмная тема'; }
 theme(localStorage.getItem('opora-theme') === 'dark' ? 'dark' : 'light');
@@ -308,13 +322,15 @@ function renderBlocks() {
   hydrateImages($('#blocks-list'));
 }
 function chooseTopic() {
+  if (editorSaving) return;
   if (!activeAdmin()) return;
   $('#dialog-title').textContent = 'Новая запись';
   $('#editor-fields').innerHTML = `<p class="muted">Выберите тему. На следующем шаге будут её категории и поля.</p><div class="topic-picker">${['knowledge','cases','access'].map(kind => `<button type="button" class="topic-button" data-choose-topic="${kind}">${icon(kind)}<strong>${rootNames[kind]}</strong><span>→</span></button>`).join('')}</div>`;
   $('#save-draft-button').hidden = true; $('#save-entry-button').hidden = true;
-  $('#editor-dialog').showModal();
+  openModal($('#editor-dialog'));
 }
 function openEditor(kind, id = null) {
+  if (editorSaving) return;
   if (!activeAdmin()) return;
   const item = db.entries.find(e => e.id === id) || {};
   const category = item.section_id || (view === kind ? sectionId : null);
@@ -338,7 +354,7 @@ function openEditor(kind, id = null) {
   if (!id) $('#editor-fields').insertAdjacentHTML('afterbegin', `<label class="field topic-select"><span>Тема</span><select name="entry_type">${['knowledge','cases','access'].map(k => `<option value="${k}" ${k === kind ? 'selected' : ''}>${rootNames[k]}</option>`).join('')}</select></label>`);
   $('#save-draft-button').hidden = kind === 'access' || (id && item.publication_state !== 'draft');
   $('#save-entry-button').textContent = kind === 'access' ? 'Сохранить подключение' : id && item.publication_state !== 'draft' ? 'Сохранить изменения' : 'Опубликовать';
-  $('#editor-dialog').showModal(); $('#editor-form [name=title]').focus();
+  openModal($('#editor-dialog')); $('#editor-form [name=title]').focus();
 }
 function openSection(kind, id = null, parent = null) {
   if (!activeAdmin()) return;
@@ -347,7 +363,7 @@ function openSection(kind, id = null, parent = null) {
   $('#section-dialog-title').textContent = id ? 'Редактировать раздел' : 'Новый раздел';
   $('#section-form').dataset.id = id || ''; $('#section-form').dataset.kind = kind;
   $('#section-fields').innerHTML = `${field('title','Название раздела',item.title,{required:true,placeholder:'Например, IP-телефония'})}<label class="field"><span>Родительский раздел</span><select name="parent_id">${sectionOptions(kind,item.parent_id || parent,id)}</select></label><label class="field"><span>Доступ</span><select name="visibility"><option value="all" ${item.visibility !== 'admins' && !privateParent ? 'selected' : ''}>Все читатели</option><option value="admins" ${item.visibility === 'admins' || privateParent ? 'selected' : ''}>Только администраторы</option></select></label>${id ? '<button type="button" class="button-danger" data-delete-section="'+escapeHtml(id)+'">Удалить раздел</button>' : ''}`;
-  $('#section-dialog').showModal(); $('#section-form [name=title]').focus();
+  openModal($('#section-dialog')); $('#section-form [name=title]').focus();
 }
 function historyValue(field, value) {
   if (value === null || value === undefined || value === '') return '—';
@@ -406,8 +422,8 @@ document.addEventListener('click', async event => {
     if (!['AnyDesk','RuDesktop','Terminal'].includes(program)) return;
     try { const response = await fetch(new URL('scripts/install-remote-links.ps1',document.baseURI)); if (!response.ok) throw Error(); const script = (await response.text()).replace('[string]$Program,', `[string]$Program = '${program}',`); const url = URL.createObjectURL(new Blob([script],{type:'text/plain;charset=utf-8'})), a = document.createElement('a'); a.href = url; a.download = `WikiHMRU-${program}.ps1`; a.click(); setTimeout(() => URL.revokeObjectURL(url),1000); } catch { toast('Не удалось скачать настройку. Попробуйте ещё раз'); } return;
   }
-  if (button.dataset.importAccess !== undefined) { if (!activeAdmin()) return; ++importFileRequest; importRows=[]; importQueue=[]; $('#remote-import-file').value=''; $('#remote-import-controls').innerHTML=''; $('#remote-import-preview').innerHTML=''; $('#remote-import-message').textContent=''; $('#remote-import-save').disabled=true; $('#remote-import-dialog').showModal(); return; }
-  if (button.dataset.closeImport !== undefined) { if(!importBusy) { ++importFileRequest; $('#remote-import-dialog').close(); } return; }
+  if (button.dataset.importAccess !== undefined) { if (!activeAdmin()) return; ++importFileRequest; importRows=[]; importQueue=[]; $('#remote-import-file').value=''; $('#remote-import-controls').innerHTML=''; $('#remote-import-preview').innerHTML=''; $('#remote-import-message').textContent=''; $('#remote-import-save').disabled=true; openModal($('#remote-import-dialog')); return; }
+  if (button.dataset.closeImport !== undefined) { if(!importBusy) { ++importFileRequest; closeModal($('#remote-import-dialog')); } return; }
   if (button.id === 'theme-toggle') return theme(document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark');
   if (button.dataset.view) return go(button.dataset.view);
   if (button.dataset.filterTag) { go(button.dataset.kind); tagFilter = button.dataset.filterTag; render(); return; }
@@ -443,7 +459,7 @@ document.addEventListener('click', async event => {
   if (button.dataset.restore) { const v = versions?.find(x => String(x.id) === button.dataset.restore); if (!v || !confirm('Восстановить эту версию? Текущая сохранится в истории.')) return; try { await db.saveEntry({ ...v.snapshot, id: selectedId }); render(); toast('Версия восстановлена'); } catch (e) { toast(e.message); } return; }
   if (button.dataset.newSection) return openSection(button.dataset.newSection, null, button.dataset.parent || null);
   if (button.dataset.editSection) { const s = db.sections.find(x => x.id === button.dataset.editSection); return openSection(s.kind, s.id); }
-  if (button.dataset.deleteSection) { if (!confirm('Удалить раздел?')) return; try { await db.deleteSection(button.dataset.deleteSection); $('#section-dialog').close(); render(); toast('Раздел удалён'); } catch (e) { toast(e.message); } return; }
+  if (button.dataset.deleteSection) { if (!confirm('Удалить раздел?')) return; try { await db.deleteSection(button.dataset.deleteSection); closeModal($('#section-dialog')); render(); toast('Раздел удалён'); } catch (e) { toast(e.message); } return; }
   if (button.dataset.adminTab) { adminTab = button.dataset.adminTab; render(); return; }
   if (button.dataset.readerPreview !== undefined) { readerPreview = true; go('home'); return; }
   if (button.dataset.exitPreview !== undefined) { readerPreview = false; go('admin'); return; }
@@ -453,8 +469,8 @@ document.addEventListener('click', async event => {
   if (button.dataset.addBlock) { draftBlocks.push({ type: button.dataset.addBlock, client_id: uuid(), text: '', caption: '', path: '', href: '' }); renderBlocks(); return; }
   if (button.dataset.removeBlock !== undefined) { const index = Number(button.dataset.removeBlock); const removed = draftBlocks.splice(index,1)[0]; if (removed?.preview) URL.revokeObjectURL(removed.preview); pendingFiles.delete(removed?.client_id); renderBlocks(); return; }
   if (button.dataset.moveBlock !== undefined) { const i = Number(button.dataset.moveBlock), j = i + Number(button.dataset.direction); if (j < 0 || j >= draftBlocks.length) return; [draftBlocks[i],draftBlocks[j]] = [draftBlocks[j],draftBlocks[i]]; renderBlocks(); return; }
-  if (button.id === 'close-dialog' || button.id === 'cancel-dialog') { $('#editor-dialog').close(); return; }
-  if (button.dataset.closeSection !== undefined) { $('#section-dialog').close(); return; }
+  if (button.id === 'close-dialog' || button.id === 'cancel-dialog') { closeModal($('#editor-dialog')); return; }
+  if (button.dataset.closeSection !== undefined) { closeModal($('#section-dialog')); return; }
   if (button.id === 'logout-button') { await db.logout(); readerPreview = false; go('home'); render(); return; }
 });
 $('#content').addEventListener('input', event => {
@@ -504,7 +520,7 @@ $('#section-fields').addEventListener('change', event => {
   if (section && ancestors(section).some(s => s.visibility === 'admins')) $('#section-form [name=visibility]').value = 'admins';
 });
 $('#editor-form').addEventListener('submit', async event => {
-  event.preventDefault(); const form = event.target; if (!form.reportValidity()) return;
+  event.preventDefault(); if(editorSaving)return; const form = event.target; if (!form.reportValidity()) return;
   if (!form.querySelector('[name=title]')) return;
   const data = Object.fromEntries(new FormData(form).entries()); const old = db.entries.find(e => e.id === editingId);
   const id = editingId || uuid();
@@ -518,6 +534,7 @@ $('#editor-form').addEventListener('submit', async event => {
     base.summary = old?.summary || ''; base.device = old?.device || '';
     if (!remoteLink(base) || base.remote_connections.some(c=>!remoteLink(c))) { toast('Проверьте программу и адрес / ID подключения'); return; }
   }
+  editorSaving=true;
   const buttons = [...form.querySelectorAll('[type=submit]')]; buttons.forEach(button => { button.disabled = true; });
   try {
     if (editorKind !== 'access') {
@@ -532,9 +549,9 @@ $('#editor-form').addEventListener('submit', async event => {
     for (const { file, i } of uploads) blocks[i].path = await db.uploadImage(id, file);
     await db.saveEntry({ ...base, blocks });
     for (const block of draftBlocks) if (block.preview) URL.revokeObjectURL(block.preview);
-    $('#editor-dialog').close(); selectedId = id; view = base.publication_state === 'draft' ? 'drafts' : editorKind; render(); toast(base.publication_state === 'draft' ? 'Черновик сохранён' : 'Запись сохранена');
+    await closeEditorAfterSave(); selectedId = id; view = base.publication_state === 'draft' ? 'drafts' : editorKind; render(); $('#content').setAttribute('tabindex','-1'); $('#content').focus({preventScroll:true}); toast(base.publication_state === 'draft' ? 'Черновик сохранён' : 'Запись сохранена');
   } catch (e) { toast('Не удалось сохранить: ' + e.message); }
-  finally { buttons.forEach(button => { button.disabled = false; }); }
+  finally { editorSaving=false; buttons.forEach(button => { button.disabled = false; }); }
 });
 $('#section-form').addEventListener('submit', async event => {
   event.preventDefault(); const form = event.target; if (!form.reportValidity()) return;
@@ -543,7 +560,7 @@ $('#section-form').addEventListener('submit', async event => {
   const parentPrivate = parentSection && ancestors(parentSection).some(x => x.visibility === 'admins');
   const s = { id: form.dataset.id || uuid(), kind: form.dataset.kind, title: data.title.trim(), parent_id: data.parent_id || null, visibility: parentPrivate ? 'admins' : data.visibility, sort_order: db.sections.find(x => x.id === form.dataset.id)?.sort_order || db.sections.filter(x => x.kind === form.dataset.kind).length + 1 };
   if (!s.title) return;
-  try { await db.saveSection(s); $('#section-dialog').close(); render(); toast('Раздел сохранён'); } catch (e) { toast(e.message); }
+  try { await db.saveSection(s); closeModal($('#section-dialog')); render(); toast('Раздел сохранён'); } catch (e) { toast(e.message); }
 });
 $('#content').addEventListener('submit', async event => {
   if (event.target.id === 'glpi-settings-form') { event.preventDefault(); const btn = event.target.querySelector('button'); btn.disabled = true; try { await db.saveSettings(new FormData(event.target).get('glpi_template')); toast('Адрес GLPI сохранён'); } catch(e) { toast(e.message); } finally { btn.disabled = false; } return; }
@@ -622,7 +639,7 @@ $('#remote-import-save').addEventListener('click',async()=>{
   if(!activeAdmin()||importBusy||!importQueue.length)return;
   previewImport();const batch=importQueue.slice(); if(!batch.length)return;
   importBusy=true;const dialog=$('#remote-import-dialog');dialog.querySelectorAll('button,input,select').forEach(el=>el.disabled=true);$('#remote-import-message').textContent=`Сохранение ${batch.length} записей…`;
-  try{await db.importAccess(batch);dialog.close();go('access');toast(`Импортировано подключений: ${batch.length}`);}catch(e){$('#remote-import-message').textContent='Не удалось сохранить: '+e.message;}finally{importBusy=false;dialog.querySelectorAll('button,input,select').forEach(el=>el.disabled=false);if(dialog.open)previewImport();}
+  try{await db.importAccess(batch);closeModal(dialog);go('access');toast(`Импортировано подключений: ${batch.length}`);}catch(e){$('#remote-import-message').textContent='Не удалось сохранить: '+e.message;}finally{importBusy=false;dialog.querySelectorAll('button,input,select').forEach(el=>el.disabled=false);if(dialog.open)previewImport();}
 });
 $('#remote-import-dialog').addEventListener('cancel',event=>{if(importBusy)event.preventDefault();});
 function sidebar(collapsed) {

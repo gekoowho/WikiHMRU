@@ -142,14 +142,22 @@ const base = process.env.WIKI_TEST_URL || 'http://127.0.0.1:8765/WikiHMRU/';
     await page.locator('#remote-import-dialog').waitFor({state:'hidden'});
     assert.equal(await page.evaluate(()=>wikiFeatures.remoteConnections(wikiStore.entries.find(e=>e.title==='Петров Петр')).length),2);
     assert.equal(await page.evaluate(()=>wikiStore.entries.find(e=>e.title==='Петров Петр').region),'Казань');
+    await page.evaluate(()=>{ const store=wikiStore, save=store.saveEntry.bind(store); store.saveEntry=async item=>{await new Promise(r=>setTimeout(r,120));return save(item);}; window.testModalOpens=0; const native=HTMLDialogElement.prototype.showModal;HTMLDialogElement.prototype.showModal=function(){window.testModalOpens++;return native.call(this);}; });
     for (const [program, id, href] of [['AnyDesk','123 456 789','anydesk:123456789'],['RuDesktop','987 654 321','wikihmru-rudesktop:987654321'],['Терминал','admin@192.168.1.20:22','wikihmru-terminal:admin%40192.168.1.20%3A22']]) {
+      const modalCount=await page.evaluate(()=>window.testModalOpens);
       await page.locator('#new-button').click();
       await page.locator('[data-choose-topic=access]').click();
+      assert.equal(await page.evaluate(()=>window.testModalOpens),modalCount+1);
       await page.locator('#editor-form [name=title]').fill('Подключение ' + program);
       await page.locator('#editor-form [name=tool]').selectOption(program);
       await page.locator('#editor-form [name=remote_id]').fill(id);
       await page.locator('#save-entry-button').click();
       await page.locator('#editor-dialog').waitFor({state:'hidden'});
+      assert.equal(await page.locator('dialog:modal').count(),0);
+      await page.locator('#theme-toggle').click();
+      await page.locator('[data-edit-entry]').click();
+      await page.locator('#cancel-dialog').click();
+      assert.equal(await page.locator('dialog:modal').count(),0);
       assert.equal(await page.locator('.workspace-detail [data-launch-remote]').getAttribute('href'),href);
       assert.equal(await page.locator('.remote-card').filter({hasText:'Подключение ' + program}).locator('[data-launch-remote]').getAttribute('href'),href);
     }
