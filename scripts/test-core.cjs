@@ -25,6 +25,8 @@ const features = context.window.wikiFeatures, db = context.window.wikiStore;
   assert.equal(features.versionChanges({blocks:[{type:'text',text:'x',client_id:'a'}]}, {blocks:[{type:'text',text:'x',client_id:'b'}]}).length,0);
   assert.equal(features.versionChanges({publication_state:'draft'}, {publication_state:'published'})[0].field,'publication_state');
   const imp=context.window.wikiImport;
+  assert.equal(features.remoteConnections({tool:'AnyDesk',remote_id:'123',remote_connections:[{tool:'AnyDesk',remote_id:'old'},{tool:'RuDesktop',remote_id:'456'}]}).length,2);
+  assert.equal(features.remoteConnections({tool:'AnyDesk',remote_id:'123'})[0].remote_id,'123');
   const parsed=imp.parseText('Имя;ID;Программа\n"ПК; склад";123 456;RuDesktop\nОфис;987;AnyDesk');
   assert.equal(parsed[1][0],'ПК; склад');assert.equal(parsed[1][1],'123 456');assert.equal(imp.mapping(parsed[0]).remote_id,1);
   assert.equal(imp.parseText('Name\tID\nOffice\t123')[1][1],'123');

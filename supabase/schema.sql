@@ -399,3 +399,7 @@ end;
 $$;
 revoke all on function public.purge_wiki_entry(uuid) from public,anon;
 grant execute on function public.purge_wiki_entry(uuid) to authenticated;
+
+alter table public.entries add column if not exists region text not null default '';
+alter table public.entries add column if not exists remote_connections jsonb not null default '[]'::jsonb;
+-- Existing tool/remote_id remain the primary connection for compatibility.

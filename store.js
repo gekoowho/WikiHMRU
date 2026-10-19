@@ -123,8 +123,8 @@
       if (!this.isAdmin()) throw Error('Недостаточно прав');
       item = features.normalizeEntry({ ...this.entries.find(e => e.id === item.id), ...item });
       item.tags = features.parseTags(item.tags); item.glpi_ticket_ids = features.parseTickets(item.glpi_ticket_ids);
-      const fields = ['id', 'type', 'section_id', 'title', 'summary', 'visibility', 'blocks', 'device', 'tool', 'remote_id', 'author_id', 'pinned', 'tags', 'publication_state', 'relevance', 'related_ids', 'glpi_ticket_ids', 'deleted_at'];
-      const record = Object.fromEntries(fields.map(key => [key, item[key] ?? (key === 'blocks' ? [] : null)]));
+      const fields = ['id', 'type', 'section_id', 'title', 'summary', 'visibility', 'blocks', 'device', 'tool', 'remote_id', 'author_id', 'pinned', 'tags', 'publication_state', 'relevance', 'related_ids', 'glpi_ticket_ids', 'deleted_at', 'region', 'remote_connections'];
+      const record = Object.fromEntries(fields.map(key => [key, item[key] ?? (['blocks','remote_connections'].includes(key) ? [] : key === 'region' ? '' : null)]));
       record.author_id = item.author_id || this.user?.id || null;
       if (!cloud) {
         const old = this.entries.find(e => e.id === item.id);

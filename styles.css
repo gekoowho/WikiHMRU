@@ -579,3 +579,8 @@ a.button-primary { display:inline-flex; align-items:center; justify-content:cent
 .import-table-wrap th,.import-table-wrap td { padding:9px; text-align:left; border-bottom:1px solid var(--border); overflow-wrap:anywhere; min-width:75px; }
 .import-table-wrap th { position:sticky; top:0; background:var(--surface-soft); }
 .import-access-button { margin-bottom:14px; width:100%; }
+
+.region-filter { margin:14px 0; }
+.remote-connection { margin:16px 0; padding-top:14px; border-top:1px solid var(--border); }
+.remote-connection h3 { flex-wrap:wrap; font-size:14px; }
+.remote-connection .connection-id { font-size:13px; }

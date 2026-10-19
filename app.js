@@ -11,6 +11,7 @@ const dateTime = value => { const d = new Date(value); return Number.isNaN(d.get
 const rootNames = { knowledge: 'База знаний', cases: 'Сложные случаи', access: 'Удалённый доступ', home: 'Обзор', admin: 'Управление', search: 'Поиск', drafts: 'Черновики', trash: 'Корзина' };
 const blockNames = { heading: 'Заголовок', text: 'Текст', code: 'Код', quote: 'Цитата / заметка', list: 'Список', image: 'Фото', link: 'Ссылка' };
 let view = 'home', sectionId = null, selectedId = null, query = '', editingId = null, editorKind = 'knowledge';
+let regionFilter = '';
 let tagFilter = '', statusFilter = '', pinnedOnly = false, commentsRequest = 0, commentRows = [];
 let draftBlocks = [], pendingFiles = new Map(), versions = null, adminTab = 'sections', readerPreview = false, toastTimer;
 const activeAdmin = () => db.isAdmin() && !readerPreview;
@@ -23,15 +24,17 @@ function readRoute() {
   sectionId = (path[1] === 'category' ? path[2] : null) || params.get('section') || null;
   selectedId = (path[1] === 'record' ? path[2] : null) || params.get('entry') || null;
   query = params.get('q') || '';
+  regionFilter = params.get('region') || '';
   tagFilter = params.get('tag') || ''; statusFilter = Object.hasOwn(features.relevance, params.get('status')) ? params.get('status') : ''; pinnedOnly = params.get('pinned') === '1';
   versions = null;
 }
 function syncRoute(replace = false) {
   const url = new URL(location.href);
-  for (const key of ['view', 'section', 'entry', 'q', 'tag', 'status', 'pinned']) url.searchParams.delete(key);
+  for (const key of ['view', 'section', 'entry', 'q', 'tag', 'status', 'pinned','region']) url.searchParams.delete(key);
   url.pathname = basePath + '/' + routePaths[view] + (selectedId ? '/record/' + encodeURIComponent(selectedId) : sectionId ? '/category/' + encodeURIComponent(sectionId) : '') + (view === 'home' ? '' : '/');
   if (selectedId && sectionId) url.searchParams.set('section', sectionId);
   if (query) url.searchParams.set('q', query);
+  if (regionFilter && view === 'access') url.searchParams.set('region',regionFilter);
   if (tagFilter) url.searchParams.set('tag', tagFilter);
   if (statusFilter) url.searchParams.set('status', statusFilter);
   if (pinnedOnly) url.searchParams.set('pinned', '1');
@@ -70,9 +73,10 @@ function programIcon(value) {
   if (p === 'AnyDesk') return '<svg class="program-icon" viewBox="0 0 100 70" aria-hidden="true"><path d="m30 5 30 30-30 30L0 35zM55 5l30 30-30 30h15l30-30L70 5z" fill="#ef3b35"/></svg>';
   return '<svg class="program-icon" viewBox="0 0 100 80" aria-hidden="true"><rect x="2" y="3" width="96" height="74" rx="5" fill="#262626"/><path d="M2 14h96" stroke="#9ca3af" stroke-width="8"/><path d="m17 31 13 10-13 10M37 53h18" stroke="white" stroke-width="5" fill="none"/></svg>';
 }
-function remoteActions(item) {
+function remoteActions(item) { return features.remoteConnections(item).map(connection => `<section class="remote-connection"><h3 class="program-badge">${programIcon(connection.tool)}${connection.tool} · <span class="connection-id">${escapeHtml(connection.remote_id)}</span></h3>${singleRemoteActions({...item,...connection})}</section>`).join(''); }
+function singleRemoteActions(item) {
   const link = remoteLink(item), program = canonicalProgram(item.tool), setupProgram = program === 'Терминал' ? 'Terminal' : program;
-  return `<div class="detail-actions">${link ? `<a class="button-primary" href="${escapeHtml(link.href)}" data-launch-remote>${link.label}</a>` : ''}<button class="button-quiet" data-copy-remote="${escapeHtml(item.id)}">Скопировать ID</button></div>${link ? `<details class="remote-setup"><summary>Приложение не открывается?</summary><p>${program === 'AnyDesk' ? 'Для запуска AnyDesk браузер должен знать, каким приложением открывать ссылку. Если используется portable-версия или кнопка ничего не делает, настройте запуск один раз.' : 'Настройте запуск один раз на этом Windows-компьютере. После этого кнопка передаст адрес / ID приложению.'}</p><ol><li>Скачайте настройку для ${escapeHtml(program)}.</li><li>Откройте PowerShell и выполните команду ниже. Если приложение не найдено, выберите его exe-файл.</li><li>Нажмите «Подключиться» и разрешите браузеру открыть приложение.</li></ol><button class="button-quiet" data-download-launcher="${escapeHtml(setupProgram)}">Скачать настройку ${escapeHtml(program)}</button><pre class="setup-command"><code>powershell -NoProfile -ExecutionPolicy Bypass -File "$env:USERPROFILE\\Downloads\\WikiHMRU-${escapeHtml(setupProgram)}.ps1"</code></pre><p class="muted">При сохранении в другую папку укажите свой путь к скачанному файлу. Настройка действует только для текущего пользователя Windows.</p></details>` : ''}`;
+  return `<div class="detail-actions">${link ? `<a class="button-primary" href="${escapeHtml(link.href)}" data-launch-remote>${link.label}</a>` : ''}<button class="button-quiet" data-copy-remote="${escapeHtml(item.id)}" data-copy-program="${escapeHtml(item.tool)}">Скопировать ID</button></div>${link ? `<details class="remote-setup"><summary>Приложение не открывается?</summary><p>${program === 'AnyDesk' ? 'Для запуска AnyDesk браузер должен знать, каким приложением открывать ссылку. Если используется portable-версия или кнопка ничего не делает, настройте запуск один раз.' : 'Настройте запуск один раз на этом Windows-компьютере. После этого кнопка передаст адрес / ID приложению.'}</p><ol><li>Скачайте настройку для ${escapeHtml(program)}.</li><li>Откройте PowerShell и выполните команду ниже. Если приложение не найдено, выберите его exe-файл.</li><li>Нажмите «Подключиться» и разрешите браузеру открыть приложение.</li></ol><button class="button-quiet" data-download-launcher="${escapeHtml(setupProgram)}">Скачать настройку ${escapeHtml(program)}</button><pre class="setup-command"><code>powershell -NoProfile -ExecutionPolicy Bypass -File "$env:USERPROFILE\\Downloads\\WikiHMRU-${escapeHtml(setupProgram)}.ps1"</code></pre><p class="muted">При сохранении в другую папку укажите свой путь к скачанному файлу. Настройка действует только для текущего пользователя Windows.</p></details>` : ''}`;
 }
 
 function toast(message) { const el = $('#toast'); el.textContent = message; el.classList.add('show'); clearTimeout(toastTimer); toastTimer = setTimeout(() => el.classList.remove('show'), 3800); }
@@ -87,7 +91,7 @@ function visibleSection(section) { return activeAdmin() || (!ancestors(section).
 function visibleEntry(entry) { return !entry.deleted_at && (activeAdmin() || (entry.publication_state !== 'draft' && entry.visibility !== 'admins' && (!entry.section_id || visibleSection(db.sections.find(s => s.id === entry.section_id) || { id: '', visibility: 'admins' })))); }
 function sectionsFor(kind) { return db.sections.filter(s => s.kind === kind && visibleSection(s)); }
 function entriesFor(kind) { return db.entries.filter(e => e.type === kind && e.publication_state !== 'draft' && visibleEntry(e)).sort((a,b) => Number(b.pinned)-Number(a.pinned) || new Date(b.updated_at)-new Date(a.updated_at)); }
-function filteredEntries(entries) { return entries.filter(e => (!tagFilter || (e.tags || []).includes(tagFilter)) && (!statusFilter || e.relevance === statusFilter) && (!pinnedOnly || e.pinned)); }
+function filteredEntries(entries) { return entries.filter(e => (view !== 'access' || !regionFilter || (regionFilter === 'none' ? !e.region : e.region === regionFilter)) && (!tagFilter || (e.tags || []).includes(tagFilter)) && (!statusFilter || e.relevance === statusFilter) && (!pinnedOnly || e.pinned)); }
 function entryBadges(entry) {
   return `${entry.pinned ? '<span class="meta-chip pinned-chip">Закреплено</span>' : ''}${entry.publication_state === 'draft' ? '<span class="meta-chip draft-chip">Черновик</span>' : ''}${entry.type !== 'access' ? `<span class="meta-chip status-chip" data-status="${escapeHtml(entry.relevance || 'verified')}">${escapeHtml(features.relevance[entry.relevance] || features.relevance.verified)}</span>` : ''}`;
 }
@@ -106,12 +110,12 @@ function descendants(id) { const found = new Set([id]); let changed = true; whil
 function sectionName(id) { return db.sections.find(s => s.id === id)?.title || 'Без раздела'; }
 function sectionTrail(id) { const s = db.sections.find(x => x.id === id); return s ? ancestors(s).map(x => x.title).join(' / ') : 'Без раздела'; }
 function card(entry) {
-  const sec = sectionTrail(entry.section_id), excerpt = entry.type === 'access' ? [canonicalProgram(entry.tool) || entry.tool, entry.remote_id].filter(Boolean).join(' · ') : entry.summary || entry.blocks?.find(b => b.type === 'text')?.text || 'Откройте запись';
+  const sec = sectionTrail(entry.section_id), excerpt = entry.type === 'access' ? features.remoteConnections(entry).map(c=>c.tool+' · '+c.remote_id).join(' / ') : entry.summary || entry.blocks?.find(b => b.type === 'text')?.text || 'Откройте запись';
   const pictogram = entry.type === 'access' ? programIcon(entry.tool) : icon(/принт|печать|мфу/i.test(entry.title + sec) ? 'printer' : entry.type);
-  const markup = `<article class="entry-card ${selectedId === entry.id ? 'selected' : ''}" data-open="${escapeHtml(entry.id)}"><span class="card-icon">${pictogram}</span><div class="card-content"><h3><button class="card-title-button" data-open="${escapeHtml(entry.id)}">${escapeHtml(entry.title)}</button></h3><p>${escapeHtml(excerpt)}</p><div class="card-top">${entry.visibility === 'admins' ? '<span class="private-chip">Только админам</span>' : ''}${entryBadges(entry)}</div>${entryTags(entry,true)}<div class="card-foot"><span>${icon('folder')}${escapeHtml(sec)}</span><span>${date(entry.updated_at)}</span></div></div></article>`;
+  const markup = `<article class="entry-card ${selectedId === entry.id ? 'selected' : ''}" data-open="${escapeHtml(entry.id)}"><span class="card-icon">${pictogram}</span><div class="card-content"><h3><button class="card-title-button" data-open="${escapeHtml(entry.id)}">${escapeHtml(entry.title)}</button></h3><p>${escapeHtml(excerpt)}</p><div class="card-top">${entry.visibility === 'admins' ? '<span class="private-chip">Только админам</span>' : ''}${entryBadges(entry)}</div>${entryTags(entry,true)}<div class="card-foot"><span>${icon('folder')}${escapeHtml(entry.type === 'access' ? [entry.region || 'Без региона',sec].join(' · ') : sec)}</span><span>${date(entry.updated_at)}</span></div></div></article>`;
   if (entry.type !== 'access') return markup;
-  const link = remoteLink(entry);
-  return `<div class="remote-card ${selectedId === entry.id ? 'selected' : ''}">${markup}<div class="remote-card-actions">${link ? `<a class="button-primary" href="${escapeHtml(link.href)}" data-launch-remote>Подключиться</a>` : ''}<button class="button-quiet" data-copy-remote="${escapeHtml(entry.id)}">Копировать ID</button></div></div>`;
+  const connections = features.remoteConnections(entry);
+  return `<div class="remote-card ${selectedId === entry.id ? 'selected' : ''}">${markup}<div class="remote-card-actions">${connections.map(c=>{const link=remoteLink(c);return link ? `<a class="button-primary" href="${escapeHtml(link.href)}" data-launch-remote>${escapeHtml(c.tool)}</a>` : '';}).join('')}<button class="button-quiet" data-copy-remote="${escapeHtml(entry.id)}">Копировать ID</button></div></div>`;
 }
 function empty(message, kind) { return `<div class="empty-state"><div class="empty-icon">◇</div><h3>Пока здесь пусто</h3><p>${escapeHtml(message)}</p>${activeAdmin() ? `<button data-create="${kind}">Добавить запись</button>` : ''}</div>`; }
 function tree(kind, selected = sectionId, admin = false) {
@@ -168,7 +172,7 @@ function searchEntries(entries, value = query) {
   const variants = [...new Set([normalized,switched,aliases])].map(v => v.match(/[\p{L}\p{N}]+/gu) || []);
   return entries.map((entry, index) => {
     const title = normalizeSearch(entry.title);
-    const text = normalizeSearch([entry.title,entry.summary,entry.device,entry.tool,entry.remote_id,...(entry.tags || []),...(entry.glpi_ticket_ids || []),sectionTrail(entry.section_id),...(entry.blocks || []).map(b => b.text || b.caption)].join(' '));
+    const text = normalizeSearch([entry.title,entry.summary,entry.device,entry.tool,entry.remote_id,entry.region,...features.remoteConnections(entry).map(c=>c.tool+' '+c.remote_id),...(entry.tags || []),...(entry.glpi_ticket_ids || []),sectionTrail(entry.section_id),...(entry.blocks || []).map(b => b.text || b.caption)].join(' '));
     let score = Infinity;
     for (const tokens of variants) {
       if (!tokens.length) continue;
@@ -182,7 +186,7 @@ function listing(kind) {
   const sectionSet = sectionId ? descendants(sectionId) : null;
   const all = entriesFor(kind).filter(e => !sectionSet || sectionSet.has(e.section_id));
   const found = searchEntries(filteredEntries(all));
-  return `<div class="workspace-layout ${selectedId ? 'has-selection' : ''}"><section class="workspace-list" aria-label="Список материалов"><div class="page-heading"><h1>${escapeHtml(rootNames[kind])}</h1>${activeAdmin() ? `<button class="button-quiet" data-create="${kind}" title="Добавить запись">＋</button>` : ''}</div><label class="search-wrap"><span class="search-icon" aria-hidden="true">${icon('search')}</span><input id="list-search" type="search" placeholder="Поиск в теме…" value="${escapeHtml(query)}" aria-label="Поиск в разделе"></label><details class="workspace-sections" ${sectionId ? 'open' : ''}><summary>${icon('folder')}${sectionId ? escapeHtml(sectionTrail(sectionId)) : 'Все категории'}</summary>${tree(kind)}</details>${filterControls(all)}${kind === 'access' && activeAdmin() ? '<button type="button" class="button-quiet import-access-button" data-import-access>Импорт из файла</button>' : ''}<div id="list-results" class="list-grid">${found.length ? found.map(card).join('') : empty('В этой теме пока нет записей или ничего не найдено.',kind)}</div></section><section class="workspace-detail" aria-label="Открытая запись">${selectedId ? detail() : `<div class="workspace-placeholder">${icon(kind)}<h2>Выберите запись</h2><p>Откройте материал слева, чтобы прочитать его здесь.</p>${activeAdmin() ? `<button class="button-primary" data-create="${kind}">Новая запись</button>` : ''}</div>`}</section></div>`;
+  return `<div class="workspace-layout ${selectedId ? 'has-selection' : ''}"><section class="workspace-list" aria-label="Список материалов"><div class="page-heading"><h1>${escapeHtml(rootNames[kind])}</h1>${activeAdmin() ? `<button class="button-quiet" data-create="${kind}" title="Добавить запись">＋</button>` : ''}</div><label class="search-wrap"><span class="search-icon" aria-hidden="true">${icon('search')}</span><input id="list-search" type="search" placeholder="Поиск в теме…" value="${escapeHtml(query)}" aria-label="Поиск в разделе"></label><details class="workspace-sections" ${sectionId ? 'open' : ''}><summary>${icon('folder')}${sectionId ? escapeHtml(sectionTrail(sectionId)) : 'Все категории'}</summary>${tree(kind)}</details>${kind === 'access' ? `<label class="field region-filter"><span>Регион</span><select id="region-filter">${regionOptions(regionFilter,true)}</select></label>` : ''}${filterControls(all)}${kind === 'access' && activeAdmin() ? '<button type="button" class="button-quiet import-access-button" data-import-access>Импорт из файла</button>' : ''}<div id="list-results" class="list-grid">${found.length ? found.map(card).join('') : empty('В этой теме пока нет записей или ничего не найдено.',kind)}</div></section><section class="workspace-detail" aria-label="Открытая запись">${selectedId ? detail() : `<div class="workspace-placeholder">${icon(kind)}<h2>Выберите запись</h2><p>Откройте материал слева, чтобы прочитать его здесь.</p>${activeAdmin() ? `<button class="button-primary" data-create="${kind}">Новая запись</button>` : ''}</div>`}</section></div>`;
 }
 function searchResults() {
   const found = searchEntries(filteredEntries(db.entries.filter(visibleEntry)));
@@ -226,7 +230,7 @@ async function loadComments(append = false) {
 function detail() {
   const item = db.entries.find(e => e.id === selectedId && visibleEntry(e)); if (!item) return '<button class="back-button" data-back>← Назад к списку</button><h1>Запись недоступна</h1><p>Она удалена или у вас нет доступа.</p>';
   const trail = sectionTrail(item.section_id);
-  return `<div class="detail-toolbar"><button class="back-button" data-back>← К списку</button><button class="button-quiet" data-copy-link>Копировать ссылку</button>${activeAdmin() ? `<button class="button-quiet" data-edit-entry="${escapeHtml(item.id)}">Редактировать</button>` : ''}</div><article class="article"><div class="article-top"><span class="badge ${escapeHtml(item.type)}">${escapeHtml(rootNames[item.type])}</span>${item.visibility === 'admins' ? '<span class="private-chip">⌁ Только админам</span>' : ''}${entryBadges(item)}</div><h1>${escapeHtml(item.title)}</h1><div class="article-meta">${escapeHtml(trail)} · Обновлено ${date(item.updated_at)}</div>${item.type !== 'access' && item.summary ? `<p class="article-lead">${escapeHtml(item.summary)}</p>` : ''}
+  return `<div class="detail-toolbar"><button class="back-button" data-back>← К списку</button><button class="button-quiet" data-copy-link>Копировать ссылку</button>${activeAdmin() ? `<button class="button-quiet" data-edit-entry="${escapeHtml(item.id)}">Редактировать</button>` : ''}</div><article class="article"><div class="article-top"><span class="badge ${escapeHtml(item.type)}">${escapeHtml(rootNames[item.type])}</span>${item.visibility === 'admins' ? '<span class="private-chip">⌁ Только админам</span>' : ''}${entryBadges(item)}</div><h1>${escapeHtml(item.title)}</h1><div class="article-meta">${item.type==='access'?escapeHtml(item.region || 'Без региона')+' · ':''}${escapeHtml(trail)} · Обновлено ${date(item.updated_at)}</div>${item.type !== 'access' && item.summary ? `<p class="article-lead">${escapeHtml(item.summary)}</p>` : ''}
   ${entryTags(item,true)}${item.type === 'access' ? `<div class="access-info"><div><small>ПРОГРАММА</small><strong class="program-badge">${programIcon(item.tool)}${escapeHtml(canonicalProgram(item.tool) || item.tool || '—')}</strong></div><div><small>${canonicalProgram(item.tool) === 'Терминал' ? 'АДРЕС ПОДКЛЮЧЕНИЯ' : 'ID ПОДКЛЮЧЕНИЯ'}</small><strong class="connection-id">${escapeHtml(item.remote_id || '—')}</strong></div></div>${remoteActions(item)}` : ''}
   <div class="article-body">${(item.type === 'access' ? [] : item.blocks || []).map((b, i) => blockHtml({ ...b, id: String(i) })).join('') || (item.type === 'access' ? '' : '<p class="article-muted">Материал пока не заполнен.</p>')}</div>
   ${relatedMaterials(item)}${item.type !== 'access' ? commentsPanel(item) : ''}${activeAdmin() ? `<div class="detail-actions"><button class="button-quiet" data-pin-entry="${escapeHtml(item.id)}">${item.pinned ? 'Открепить' : 'Закрепить'}</button><button class="button-quiet" data-history="${escapeHtml(item.id)}">История изменений</button><button class="button-danger" data-delete-entry="${escapeHtml(item.id)}">В корзину</button></div><div id="history-panel"></div>` : ''}</article>`;
@@ -279,7 +283,8 @@ function render() {
   hydrateImages($('#content'));
   if ($('#comments-panel')) loadComments();
 }
-function go(next, sec = null) { if (db.cloud && (!db.session || db.needsPassword)) return; view = next; sectionId = sec; selectedId = null; query = ''; tagFilter = ''; statusFilter = ''; pinnedOnly = false; versions = null; render(); }
+function go(next, sec = null) { regionFilter=''; if (db.cloud && (!db.session || db.needsPassword)) return; view = next; sectionId = sec; selectedId = null; query = ''; tagFilter = ''; statusFilter = ''; pinnedOnly = false; regionFilter = ''; versions = null; render(); }
+function regionOptions(selected='', filter=false) { return `<option value="">${filter?'Все регионы':'Не указан'}</option>${filter?`<option value="none" ${selected==='none'?'selected':''}>Без региона</option>`:''}${[...new Set([...features.regions,...db.entries.filter(e=>e.type==='access'&&e.region).map(e=>e.region)])].map(r=>`<option value="${escapeHtml(r)}" ${selected===r?'selected':''}>${escapeHtml(r)}</option>`).join('')}`; }
 function sectionOptions(kind, selected = '', exclude = null) {
   const list = db.sections.filter(s => s.kind === kind && s.id !== exclude && (!exclude || !descendants(exclude).has(s.id)));
   return `<option value="">Без раздела</option>${list.map(s => `<option value="${escapeHtml(s.id)}" ${selected === s.id ? 'selected' : ''}>${escapeHtml('— '.repeat(Math.max(0, ancestors(s).length - 1)) + s.title)}</option>`).join('')}`;
@@ -319,8 +324,11 @@ function openEditor(kind, id = null) {
   $('#dialog-title').textContent = id ? 'Редактировать запись' : 'Новая запись';
   if (kind === 'access') {
     const program = canonicalProgram(item.tool) || 'AnyDesk';
+    const connections = features.remoteConnections(item);
+    const additional = tool => connections.find(c=>c.tool===tool)?.remote_id || '';
+    const region = item.region || (features.regions.includes(regionFilter)?regionFilter:'');
     const selectedSection = item.section_id || (view === 'access' ? sectionId : null) || '';
-    $('#editor-fields').innerHTML = `<div class="editor-top-grid">${field('title','Имя',item.title,{required:true,placeholder:'Например, сервер бухгалтерии'})}<label class="field"><span>Программа</span><select name="tool">${remotePrograms.map(p => `<option value="${p}" ${p === program ? 'selected' : ''}>${p}</option>`).join('')}</select></label>${field('remote_id','Адрес / ID подключения',item.remote_id,{required:true,placeholder:'192.168.1.10 или ID подключения'})}<label class="field"><span>Доступ</span><select name="visibility"><option value="all" ${item.visibility !== 'admins' && !privateParent ? 'selected' : ''}>Все читатели</option><option value="admins" ${item.visibility === 'admins' || privateParent ? 'selected' : ''}>Только администраторы</option></select></label><label class="field"><span>Категория</span><select name="section_id">${sectionOptions(kind,selectedSection)}</select></label></div><p class="muted">Для SSH: IP или имя сервера; можно указать user@host:port. По умолчанию порт 22.</p>`;
+    $('#editor-fields').innerHTML = `<div class="editor-top-grid">${field('title','Имя',item.title,{required:true,placeholder:'Например, сервер бухгалтерии'})}<label class="field"><span>Программа</span><select name="tool" data-current="${program}">${remotePrograms.map(p => `<option value="${p}" ${p === program ? 'selected' : ''}>${p}</option>`).join('')}</select></label>${field('remote_id','Основной адрес / ID',item.remote_id,{required:true,placeholder:'ID выбранной программы'})}<div data-extra-tool="AnyDesk" ${program==='AnyDesk'?'hidden':''}>${field('additional_anydesk','Дополнительный AnyDesk ID',additional('AnyDesk'),{placeholder:'Необязательно'})}</div><div data-extra-tool="RuDesktop" ${program==='RuDesktop'?'hidden':''}>${field('additional_rudesktop','Дополнительный RuDesktop ID',additional('RuDesktop'),{placeholder:'Необязательно'})}</div><div data-extra-tool="Терминал" ${program==='Терминал'?'hidden':''}>${field('additional_terminal','Дополнительный адрес терминала',additional('Терминал'),{placeholder:'Необязательно: user@host:port'})}</div><label class="field"><span>Регион</span><select name="region">${regionOptions(region)}</select></label><label class="field"><span>Доступ</span><select name="visibility"><option value="all" ${item.visibility !== 'admins' && !privateParent ? 'selected' : ''}>Все читатели</option><option value="admins" ${item.visibility === 'admins' || privateParent ? 'selected' : ''}>Только администраторы</option></select></label><label class="field"><span>Категория</span><select name="section_id">${sectionOptions(kind,selectedSection)}</select></label></div><p class="muted">Для SSH: IP или имя сервера; можно указать user@host:port. По умолчанию порт 22.</p>`;
   } else {
   $('#editor-fields').innerHTML = `<div class="editor-top-grid">${field('title','Название',item.title,{required:true,placeholder:'Короткое понятное название'})}${field('summary','Краткое описание',item.summary,{placeholder:'О чём материал'})}<label class="field"><span>Раздел</span><select name="section_id">${sectionOptions(kind,item.section_id || (view === kind ? sectionId : ''))}</select></label><label class="field"><span>Доступ</span><select name="visibility"><option value="all" ${item.visibility !== 'admins' && !privateParent ? 'selected' : ''}>Все читатели</option><option value="admins" ${item.visibility === 'admins' || privateParent ? 'selected' : ''}>Только администраторы</option></select></label></div>
   ${metadataEditor(item)}<div class="template-toolbar"><label class="field"><span>Шаблон</span><select id="entry-template">${Object.entries(features.templates).map(([key,t]) => `<option value="${key}">${t.name}</option>`).join('')}</select></label><button type="button" class="button-quiet" data-apply-template>Применить шаблон</button></div><div class="block-area"><div class="block-area-head"><div><strong>Содержание</strong><p>Соберите карточку из блоков в нужном порядке.</p></div></div><div id="blocks-list"></div><div class="block-toolbar">${Object.entries(blockNames).map(([type,label]) => `<button type="button" data-add-block="${type}">＋ ${label}</button>`).join('')}</div></div>`;
@@ -351,12 +359,13 @@ function historyValue(field, value) {
   if (field === 'relevance') return features.relevance[value] || value;
   if (field === 'deleted_at') return value ? 'В корзине' : 'Доступна';
   if (field === 'related_ids') return value.map(id => db.entries.find(e => e.id === id)?.title || id).join(', ') || '—';
+  if (field === 'remote_connections') return features.remoteConnections({remote_connections:value}).map(c=>c.tool+': '+c.remote_id).join('\n') || '—';
   if (Array.isArray(value)) return value.join(', ') || '—';
   if (field === 'block') return [blockNames[value.type] || value.type,value.text,value.caption,value.href,value.path ? 'Фото прикреплено' : ''].filter(Boolean).join('\n');
   return String(value);
 }
 function historyDiff(before,after) {
-  const labels = {title:'Название',summary:'Описание',type:'Тема',section_id:'Категория',visibility:'Доступ',tool:'Программа',remote_id:'Адрес / ID подключения',device:'Устройство',pinned:'Закрепление',tags:'Теги',glpi_ticket_ids:'Заявки GLPI',related_ids:'Связанные материалы',publication_state:'Публикация',relevance:'Актуальность',deleted_at:'Корзина'};
+  const labels = {title:'Название',summary:'Описание',type:'Тема',section_id:'Категория',visibility:'Доступ',tool:'Программа',remote_id:'Адрес / ID подключения',device:'Устройство',pinned:'Закрепление',tags:'Теги',glpi_ticket_ids:'Заявки GLPI',related_ids:'Связанные материалы',publication_state:'Публикация',relevance:'Актуальность',deleted_at:'Корзина',region:'Регион',remote_connections:'Подключения'};
   const changes = features.versionChanges(before,after);
   return changes.length ? `<ul class="history-changes">${changes.map(c => {
     const blockLabel = !c.before ? 'добавлен' : !c.after ? 'удалён' : c.before.path !== c.after.path && c.before.type === 'image' && c.after.type === 'image' ? 'изображение заменено' : 'изменён';
@@ -439,7 +448,7 @@ document.addEventListener('click', async event => {
   if (button.dataset.readerPreview !== undefined) { readerPreview = true; go('home'); return; }
   if (button.dataset.exitPreview !== undefined) { readerPreview = false; go('admin'); return; }
   if (button.dataset.search !== undefined) { query = $('#home-search').value.trim(); view = 'search'; sectionId = null; selectedId = null; versions = null; render(); return; }
-  if (button.dataset.copyRemote) { const item = db.entries.find(e => e.id === button.dataset.copyRemote && visibleEntry(e)); if (item) { try { await navigator.clipboard.writeText(item.remote_id || ''); toast('ID скопирован'); } catch { toast('Не удалось скопировать ID'); } } return; }
+  if (button.dataset.copyRemote) { const item = db.entries.find(e => e.id === button.dataset.copyRemote && visibleEntry(e)); if (item) { try { await navigator.clipboard.writeText((button.dataset.copyProgram ? features.remoteConnections(item).find(c=>c.tool===canonicalProgram(button.dataset.copyProgram))?.remote_id : features.remoteConnections(item).map(c=>c.tool+': '+c.remote_id).join('\n')) || item.remote_id || ''); toast('ID скопирован'); } catch { toast('Не удалось скопировать ID'); } } return; }
   if (button.dataset.copyCode !== undefined) { const b = db.entries.find(e => e.id === selectedId)?.blocks?.[Number(button.dataset.copyCode)]; if (b) { await navigator.clipboard.writeText(b.text || ''); toast('Код скопирован'); } return; }
   if (button.dataset.addBlock) { draftBlocks.push({ type: button.dataset.addBlock, client_id: uuid(), text: '', caption: '', path: '', href: '' }); renderBlocks(); return; }
   if (button.dataset.removeBlock !== undefined) { const index = Number(button.dataset.removeBlock); const removed = draftBlocks.splice(index,1)[0]; if (removed?.preview) URL.revokeObjectURL(removed.preview); pendingFiles.delete(removed?.client_id); renderBlocks(); return; }
@@ -456,6 +465,7 @@ $('#content').addEventListener('input', event => {
 });
 $('#content').addEventListener('keydown', event => { if (event.target.id === 'home-search' && event.key === 'Enter') { event.preventDefault(); query = event.target.value.trim(); view = 'search'; selectedId = null; render(); } });
 $('#content').addEventListener('change', async event => {
+  if (event.target.id === 'region-filter') { regionFilter=event.target.value; selectedId=null; render(); return; }
   if (event.target.dataset.tagFilter !== undefined || event.target.dataset.statusFilter !== undefined || event.target.dataset.pinnedFilter !== undefined) {
     if (event.target.dataset.tagFilter !== undefined) tagFilter = event.target.value;
     if (event.target.dataset.statusFilter !== undefined) statusFilter = event.target.value;
@@ -474,6 +484,7 @@ $('#editor-fields').addEventListener('input', event => {
   if (key && draftBlocks[index]) draftBlocks[index][key] = event.target.value;
 });
 $('#editor-fields').addEventListener('change', event => {
+  if (event.target.name === 'tool') { const select=event.target, old=select.dataset.current, names={AnyDesk:'additional_anydesk',RuDesktop:'additional_rudesktop','Терминал':'additional_terminal'}; if(names[old]) $(`#editor-form [name=${names[old]}]`).value=$('#editor-form [name=remote_id]').value; $('#editor-form [name=remote_id]').value=names[select.value]?$(`#editor-form [name=${names[select.value]}]`).value:''; document.querySelectorAll('[data-extra-tool]').forEach(el=>el.hidden=el.dataset.extraTool===select.value); select.dataset.current=select.value; return; }
   if (event.target.name === 'entry_type') { const title = $('#editor-form [name=title]').value, kind = event.target.value; if (draftBlocks.length && !confirm('Сменить тему и очистить содержимое новой записи?')) { event.target.value = editorKind; return; } openEditor(kind); $('#editor-form [name=title]').value = title; return; }
   if (event.target.name === 'related_ids') { $('.related-picker summary').textContent = `Связанные материалы (${$('#related-options').querySelectorAll('input:checked').length})`; return; }
   if (event.target.name === 'section_id') {
@@ -502,8 +513,10 @@ $('#editor-form').addEventListener('submit', async event => {
   const base = { ...features.normalizeEntry(old || {}), id, type: editorKind, section_id: data.section_id || null, title: data.title.trim(), summary: (data.summary || '').trim(), visibility: forcedPrivate ? 'admins' : data.visibility, tool: (data.tool || '').trim(), device: (data.device || '').trim(), remote_id: (data.remote_id || '').trim(), author_id: old?.author_id || db.user?.id || null };
   if (!base.title) return;
   if (editorKind === 'access') {
+    base.region = (data.region || '').trim();
+    base.remote_connections = features.remoteConnections({...base,remote_connections:[{tool:'AnyDesk',remote_id:data.additional_anydesk},{tool:'RuDesktop',remote_id:data.additional_rudesktop},{tool:'Терминал',remote_id:data.additional_terminal}]});
     base.summary = old?.summary || ''; base.device = old?.device || '';
-    if (!remoteLink(base)) { toast('Проверьте программу и адрес / ID подключения'); return; }
+    if (!remoteLink(base) || base.remote_connections.some(c=>!remoteLink(c))) { toast('Проверьте программу и адрес / ID подключения'); return; }
   }
   const buttons = [...form.querySelectorAll('[type=submit]')]; buttons.forEach(button => { button.disabled = true; });
   try {
@@ -547,7 +560,7 @@ $('#content').addEventListener('submit', async event => {
   }
 });
 let importSheets=[], importText='', importRows=[], importMap={}, importQueue=[], importBusy=false, importFileRequest=0;
-const importFields={title:'Имя',remote_id:'Адрес / ID',tool:'Программа',visibility:'Доступ'};
+const importFields={title:'Имя / ФИ',remote_id:'Основной адрес / ID',anydesk_id:'AnyDesk ID (отдельная колонка)',rudesktop_id:'RuDesktop ID (отдельная колонка)',region:'Регион',tool:'Программа',visibility:'Доступ'};
 function setupImportControls() {
   const sheet=Number($('#import-sheet')?.value || 0);
   importRows=importSheets[sheet]?.rows || [];
@@ -556,7 +569,7 @@ function setupImportControls() {
   importMap=window.wikiImport.mapping(importRows[0]);
   const header=Object.values(importMap).some(v=>v>=0);
   const previousSection=sectionId || '';
-  $('#remote-import-controls').innerHTML=`${importSheets.length>1 ? `<label class="field"><span>Лист Excel</span><select id="import-sheet">${importSheets.map((s,i)=>`<option value="${i}" ${i===sheet?'selected':''}>${escapeHtml(s.name)}</option>`).join('')}</select></label>`:''}${importText ? `<label class="field"><span>Разделитель</span><select id="import-delimiter"><option value="auto">Определить автоматически</option><option value="tab">Табуляция</option><option value=";">Точка с запятой</option><option value=",">Запятая</option><option value="|">Вертикальная черта</option><option value="spaces">Два и более пробелов</option></select></label>`:''}<label class="check-field"><input id="import-header" type="checkbox" ${header?'checked':''}> Первая строка — названия колонок</label><div class="editor-top-grid">${Object.entries(importFields).map(([key,label])=>`<label class="field"><span>${label}</span><select data-import-map="${key}"><option value="-1">${['tool','visibility'].includes(key)?'Общее значение ниже':'Выберите колонку'}</option>${Array.from({length:width},(_,i)=>`<option value="${i}" ${importMap[key]===i?'selected':''}>${i+1}: ${escapeHtml(importRows[0][i] || 'Колонка '+(i+1))}</option>`).join('')}</select></label>`).join('')}<label class="field"><span>Общая программа</span><select id="import-program">${remotePrograms.map(p=>`<option>${p}</option>`).join('')}</select></label><label class="field"><span>Общий доступ</span><select id="import-visibility"><option value="all">Все читатели</option><option value="admins">Только администраторы</option></select></label><label class="field"><span>Категория для всех записей</span><select id="import-section">${sectionOptions('access',previousSection)}</select></label></div>`;
+  $('#remote-import-controls').innerHTML=`${importSheets.length>1 ? `<label class="field"><span>Лист Excel</span><select id="import-sheet">${importSheets.map((s,i)=>`<option value="${i}" ${i===sheet?'selected':''}>${escapeHtml(s.name)}</option>`).join('')}</select></label>`:''}${importText ? `<label class="field"><span>Разделитель</span><select id="import-delimiter"><option value="auto">Определить автоматически</option><option value="tab">Табуляция</option><option value=";">Точка с запятой</option><option value=",">Запятая</option><option value="|">Вертикальная черта</option><option value="spaces">Два и более пробелов</option></select></label>`:''}<label class="check-field"><input id="import-header" type="checkbox" ${header?'checked':''}> Первая строка — названия колонок</label><div class="editor-top-grid">${Object.entries(importFields).map(([key,label])=>`<label class="field"><span>${label}</span><select data-import-map="${key}"><option value="-1">${['tool','visibility'].includes(key)?'Общее значение ниже':'Выберите колонку'}</option>${Array.from({length:width},(_,i)=>`<option value="${i}" ${importMap[key]===i?'selected':''}>${i+1}: ${escapeHtml(importRows[0][i] || 'Колонка '+(i+1))}</option>`).join('')}</select></label>`).join('')}<label class="field"><span>Общая программа</span><select id="import-program">${remotePrograms.map(p=>`<option>${p}</option>`).join('')}</select></label><label class="field"><span>Общий доступ</span><select id="import-visibility"><option value="all">Все читатели</option><option value="admins">Только администраторы</option></select></label><label class="field"><span>Общий регион</span><select id="import-region">${regionOptions(features.regions.includes(regionFilter)?regionFilter:'')}</select></label><label class="field"><span>Категория для всех записей</span><select id="import-section">${sectionOptions('access',previousSection)}</select></label></div>`;
   if(!header){ if(width>1){importMap.title=0;importMap.remote_id=1;$('[data-import-map=title]').value='0';$('[data-import-map=remote_id]').value='1';} }
   previewImport();
 }
@@ -566,22 +579,28 @@ function previewImport() {
   const controls=$('#remote-import-controls'); if(!controls.querySelector('#import-header'))return;
   const map=Object.fromEntries([...controls.querySelectorAll('[data-import-map]')].map(el=>[el.dataset.importMap,Number(el.value)]));
   const header=$('#import-header').checked, cat=$('#import-section').value, privateCategory=cat && ancestors(db.sections.find(s=>s.id===cat)).some(s=>s.visibility==='admins');
-  const used=Object.values(map).filter(i=>i>=0);const error=map.title<0||map.remote_id<0 ? 'Назначьте колонки имени и ID / адреса.' : new Set(used).size!==used.length ? 'Для каждого поля выберите отдельную колонку.' : '';
+  const used=Object.values(map).filter(i=>i>=0);const error=map.title<0||(map.remote_id<0&&map.anydesk_id<0&&map.rudesktop_id<0) ? 'Назначьте колонку имени и хотя бы одну колонку ID / адреса.' : new Set(used).size!==used.length ? 'Для каждого поля выберите отдельную колонку.' : '';
   const rows=importRows.slice(header?1:0);if(rows.length>500){$('#remote-import-message').textContent='До 500 записей за импорт';$('#remote-import-save').disabled=true;return;}
-  const seen=new Set(db.entries.filter(e=>e.type==='access').map(e=>canonicalProgram(e.tool)+'|'+String(e.remote_id||'').replace(/\s/g,'').toLowerCase()));
+  const seen=new Set(db.entries.filter(e=>e.type==='access').flatMap(e=>features.remoteConnections(e).map(c=>c.tool+'|'+c.remote_id.replace(/\s/g,'').toLowerCase())));
   const preview=rows.map((r,index)=>{
-    const title=String(r[map.title]||'').trim(), remote_id=String(r[map.remote_id]||'').trim(), tool=map.tool<0?$('#import-program').value:window.wikiImport.program(r[map.tool]);
+    const title=String(r[map.title]||'').trim();
+    let remote_id=String(r[map.remote_id]||'').trim(), tool=map.tool<0?$('#import-program').value:window.wikiImport.program(r[map.tool]);
+    const extra=[{tool:'AnyDesk',remote_id:String(r[map.anydesk_id]||'').trim()},{tool:'RuDesktop',remote_id:String(r[map.rudesktop_id]||'').trim()}].filter(c=>c.remote_id);
+    if(!remote_id && extra.length){tool=extra[0].tool;remote_id=extra[0].remote_id;}
+    const rawRegion=map.region<0?$('#import-region').value:String(r[map.region]||'').trim();
+    const region=features.regions.find(v=>v.toLowerCase()===rawRegion.toLowerCase()) || ({'банаул':'Барнаул','беларусь':'Белоруссия'})[rawRegion.toLowerCase()] || rawRegion;
     const v=map.visibility<0?$('#import-visibility').value:String(r[map.visibility]||'').trim().toLowerCase();
     const all=['all','все','все читатели','читатели','общий','reader'], admins=['admins','admin','администраторы','только администраторы','только админам','закрытый'];
     const visibility=privateCategory?'admins':all.includes(v)?'all':admins.includes(v)?'admins':'';
-    const item={id:uuid(),type:'access',title,remote_id,tool,visibility,section_id:cat||null,blocks:[],summary:'',device:'',author_id:db.user?.id||null};
-    const key=tool+'|'+remote_id.replace(/\s/g,'').toLowerCase();
-    let status=error||(!title?'Нет имени':!tool?'Неизвестная программа':!visibility?'Неизвестный доступ':!remoteLink(item)?'Некорректный адрес / ID':seen.has(key)?'Повтор: пропускается':'Готово');
-    if(status==='Готово'){seen.add(key);importQueue.push(item);}
-    return `<tr><td>${index+(header?2:1)}</td><td>${escapeHtml(title)}</td><td>${escapeHtml(remote_id)}</td><td>${escapeHtml(tool)}</td><td>${visibility==='admins'?'Только админам':visibility==='all'?'Все читатели':'—'}</td><td>${escapeHtml(status)}</td></tr>`;
+    const item={id:uuid(),type:'access',title,remote_id,tool,region,remote_connections:extra,visibility,section_id:cat||null,blocks:[],summary:'',device:'',author_id:db.user?.id||null};
+    const connections=features.remoteConnections(item);item.remote_connections=connections;
+    const keys=connections.map(c=>c.tool+'|'+c.remote_id.replace(/\s/g,'').toLowerCase());
+    let status=error||(!title?'Нет имени':!tool?'Неизвестная программа':!visibility?'Неизвестный доступ':(region && !features.regions.includes(region))?'Неизвестный регион':(!remoteLink(item)||connections.some(c=>!remoteLink(c)))?'Некорректный адрес / ID':keys.some(key=>seen.has(key))?'Повтор: пропускается':'Готово');
+    if(status==='Готово'){keys.forEach(key=>seen.add(key));importQueue.push(item);}
+    return `<tr><td>${index+(header?2:1)}</td><td>${escapeHtml(title)}</td><td>${escapeHtml(connections.map(c=>c.tool+': '+c.remote_id).join(' / '))}</td><td>${escapeHtml(region || 'Без региона')}</td><td>${visibility==='admins'?'Только админам':visibility==='all'?'Все читатели':'—'}</td><td>${escapeHtml(status)}</td></tr>`;
   });
   $('#remote-import-message').textContent=error||`Готово к импорту: ${importQueue.length} из ${rows.length}. Ошибки и повторы будут пропущены.`;
-  $('#remote-import-preview').innerHTML=`<div class="import-table-wrap"><table><thead><tr><th>Строка</th><th>Имя</th><th>Адрес / ID</th><th>Программа</th><th>Доступ</th><th>Проверка</th></tr></thead><tbody>${preview.join('')}</tbody></table></div>`;
+  $('#remote-import-preview').innerHTML=`<div class="import-table-wrap"><table><thead><tr><th>Строка</th><th>Имя</th><th>Подключения</th><th>Регион</th><th>Доступ</th><th>Проверка</th></tr></thead><tbody>${preview.join('')}</tbody></table></div>`;
   $('#remote-import-save').disabled=!importQueue.length||!activeAdmin();$('#remote-import-save').textContent=`Импортировать ${importQueue.length} записей`;
 }
 $('#remote-import-file').addEventListener('change',async event=>{

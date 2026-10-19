@@ -46,7 +46,7 @@
   }
   function versionChanges(before, after) {
     before = normalizeEntry(before || {}); after = normalizeEntry(after || {});
-    const fields = ['title','summary','type','section_id','visibility','tool','remote_id','device','pinned','tags','glpi_ticket_ids','related_ids','publication_state','relevance','deleted_at'];
+    const fields = ['title','summary','type','section_id','visibility','tool','remote_id','device','pinned','tags','glpi_ticket_ids','related_ids','publication_state','relevance','deleted_at','region','remote_connections'];
     const changes = [];
     const equal = (a,b) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
     for (const field of fields) if (!equal(before[field],after[field])) changes.push({field,before:before[field],after:after[field]});
@@ -57,5 +57,16 @@
     }
     return changes;
   }
-  window.wikiFeatures = { glpiDefault: 'https://helpdesk.hmru.ru:8080/front/ticket.form.php?id={id}', relevance, templates, templateBlocks, parseTags, parseTickets, normalizeEntry, validateGlpiTemplate, ticketUrl, versionChanges };
+  const regions = ['Новосибирск','Москва','Ростов-на-Дону','Екатеринбург','Барнаул','Санкт-Петербург','Белоруссия','Казахстан','Казань'];
+  function remoteConnections(entry) {
+    const result=[], seen=new Set();
+    const canonical = value => ({anydesk:'AnyDesk',энидеск:'AnyDesk',анидеск:'AnyDesk',rudesktop:'RuDesktop',рудесктоп:'RuDesktop',терминал:'Терминал',terminal:'Терминал',putty:'Терминал',mobaxterm:'Терминал'})[String(value||'').toLowerCase().replace(/[\s-]/g,'')];
+    for (const item of [{tool:entry.tool,remote_id:entry.remote_id},...(Array.isArray(entry.remote_connections)?entry.remote_connections:[])]) {
+      const tool=canonical(item?.tool), remote_id=String(item?.remote_id||'').trim();
+      if(!tool || !remote_id || seen.has(tool)) continue;
+      result.push({tool,remote_id});seen.add(tool);
+    }
+    return result;
+  }
+  window.wikiFeatures = { glpiDefault: 'https://helpdesk.hmru.ru:8080/front/ticket.form.php?id={id}', relevance, templates, templateBlocks, parseTags, parseTickets, normalizeEntry, validateGlpiTemplate, ticketUrl, versionChanges, regions, remoteConnections };
 })();

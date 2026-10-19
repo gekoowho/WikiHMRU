@@ -11,7 +11,7 @@ function parseText(text, delimiter='auto') {
   if(delimiter==='auto') { const candidates=['\t',';',',','|','spaces']; delimiter=candidates.map(d=>({d,rows:delimited(text,d)})).map(x=>({...x,score:x.rows.slice(0,10).reduce((n,r)=>n+(r.length>1?r.length:0),0)})).sort((a,b)=>b.score-a.score)[0].d; }
   return delimited(text,delimiter);
 }
-const aliases={title:['имя','название','name','title','компьютер','устройство','пк','hostname'],remote_id:['id','ид','адрес','ip','address','idподключения','адресподключения','anydeskid','rudesktopid'],tool:['программа','program','tool','тип','приложение','клиент'],visibility:['доступ','access','visibility','права']};
+const aliases={region:['регион','город','region','city'],anydesk_id:['anydesk','anydeskid','энидеск','анидеск'],rudesktop_id:['rudesktop','rudesktopid','рудесктоп'],title:['имя','название','name','title','компьютер','устройство','пк','hostname','фи','фио','сотрудник'],remote_id:['id','ид','адрес','ip','address','idподключения','адресподключения'],tool:['программа','program','tool','тип','приложение','клиент'],visibility:['доступ','access','visibility','права']};
 const normalize=s=>String(s||'').toLowerCase().replace(/[\s_\-\/]/g,'');
 function mapping(row) { const map={};for(const [field,names] of Object.entries(aliases)){map[field]=row.findIndex(v=>names.includes(normalize(v)));}return map; }
 function program(value) { return ({anydesk:'AnyDesk',энидеск:'AnyDesk',анидеск:'AnyDesk',rudesktop:'RuDesktop',рудесктоп:'RuDesktop',терминал:'Терминал',terminal:'Терминал',ssh:'Терминал',cmd:'Терминал'})[normalize(value)] || ''; }
